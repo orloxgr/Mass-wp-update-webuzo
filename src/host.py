@@ -112,12 +112,12 @@ def account_path():
     return ':'.join(directories + ENV['PATH'].split(':'))
 
 
-def run_as(account, arguments, cwd, timeout=300, output=None):
+def run_as(account, arguments, cwd, timeout=300, output=None, database=False):
     unix = pwd.getpwnam(account['owner'])
     if (unix.pw_uid == 0 or unix.pw_name == 'webuzo' or unix.pw_uid != account['uid'] or
             unix.pw_gid != account['gid'] or unix.pw_dir != account['home']):
         raise ValueError('Hosting account changed; refresh sites before updating')
-    env = {**ENV, 'PATH': account_path(), 'HOME': str(cwd), 'USER': unix.pw_name, 'LOGNAME': unix.pw_name,
+    env = {**ENV, 'PATH': account_path() if database else ENV['PATH'], 'HOME': str(cwd), 'USER': unix.pw_name, 'LOGNAME': unix.pw_name,
            'WP_CLI_CONFIG_PATH': '/dev/null', 'WP_CLI_DISABLE_AUTO_CHECK_UPDATE': '1',
            'WP_CLI_CACHE_DIR': str(cwd / 'cache'), 'WP_CLI_PACKAGES_DIR': str(cwd / 'packages')}
     # Backups use an inherited, already-open root-private output descriptor. Limit
@@ -183,7 +183,7 @@ def wp(site, args, cwd, timeout=600, output=None):
             args = [*args, '--socket=' + socket]
     # This process is already the account UID before PHP or wp-config.php loads.
     return run_as(site, [site['php_bin'], wp_cli(), '--path=' + site['path'], '--skip-plugins',
-        '--skip-themes', '--skip-packages', '--no-color', *args], cwd, timeout, output)
+        '--skip-themes', '--skip-packages', '--no-color', *args], cwd, timeout, output, database=args[:2] == ['db', 'export'])
 
 
 @functools.lru_cache(maxsize=4096)

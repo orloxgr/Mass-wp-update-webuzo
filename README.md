@@ -38,6 +38,8 @@ WordPress must use the standard content, plugin, and theme directories. `wp-conf
 
 Account and domain discovery uses Webuzo's existing CLI. Each WordPress process runs with that hosting account's Unix UID and the domain's native Webuzo PHP runtime. Suspended accounts are skipped. Account ownership or unsupported WordPress layouts produce an error instead of falling back to root. WordPress commands, database exports, and file backups never execute as root.
 
+System paths must be owned by UID 0 and must not be writable by other users. Group-writable paths are accepted only for GID 0 when all explicit and primary-group members have UID 0. MySQL/MariaDB client discovery runs only for database exports, so it does not block site discovery or unrelated actions. Rejected paths report the exact component, ownership, permissions, and reason.
+
 The plugin creates its own private data directory, a separate working directory for account processes, and a native-panel request directory under `/run`. A systemd tmpfiles entry recreates that request directory after reboot. No WordPress companion plugin, scheduled update, daemon, sudoers entry, or change to Webuzo core files is required. Deactivation stops new jobs and preserves the library and backups; wait for a running job to finish before deactivating.
 
 Commands have timeouts, captured output is limited to 4 MiB, and backup output reserves 256 MiB of available filesystem space. A command failure is recorded and stops the remaining actions for that site. Updates already completed on that site remain applied.

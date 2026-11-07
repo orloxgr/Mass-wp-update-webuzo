@@ -1,5 +1,6 @@
 """Linux/root tests use isolated temporary state and synthetic plugin packages."""
 import json
+import grp
 import os
 from pathlib import Path
 import pwd
@@ -119,9 +120,36 @@ class BackendTests(unittest.TestCase):
         secret = self.base / 'file'; secret.write_text('secret'); os.chmod(secret, 0o600)
         link = self.base / 'link'; link.symlink_to(secret)
         with self.assertRaises(ValueError): state.trusted(link)
+        os.chown(self.base,0,pwd.getpwnam('nobody').pw_gid)
         os.chmod(self.base, 0o770)
         with self.assertRaises(ValueError): state.trusted(secret)
-        os.chmod(self.base, 0o700)
+        os.chmod(self.base, 0o700);os.chown(self.base,0,0)
+
+    def test_root_group_writable_native_directory_is_trusted_only_for_root_members(self):
+        from types import SimpleNamespace
+        directory=self.base/'native-db';directory.mkdir();os.chown(directory,0,0);directory.chmod(0o2775)
+        with patch.object(grp,'getgrgid',return_value=SimpleNamespace(gr_mem=['root'])), \
+             patch.object(pwd,'getpwall',return_value=[SimpleNamespace(pw_gid=0,pw_uid=0)]):
+            self.assertEqual(state.trusted(directory,True),directory)
+        with patch.object(grp,'getgrgid',return_value=SimpleNamespace(gr_mem=['nobody'])):
+            with self.assertRaisesRegex(ValueError,'gid=0, mode=0o2775'):state.trusted(directory,True)
+        with patch.object(grp,'getgrgid',return_value=SimpleNamespace(gr_mem=[])), \
+             patch.object(pwd,'getpwall',return_value=[SimpleNamespace(pw_gid=0,pw_uid=65534)]):
+            with self.assertRaises(ValueError):state.trusted(directory,True)
+        directory.chmod(0o2777)
+        with self.assertRaisesRegex(ValueError,'writable by other users'):state.trusted(directory,True)
+
+    def test_non_database_account_work_does_not_inspect_database_clients(self):
+        account=pwd.getpwnam('nobody')
+        identity=dict(owner=account.pw_name,uid=account.pw_uid,gid=account.pw_gid,home=account.pw_dir)
+        self.base.chmod(0o711);scratch=host.work(identity)
+        try:
+            with patch.object(host,'account_path',side_effect=ValueError('Database client permissions rejected')):
+                value=host.run_as(identity,['/usr/bin/python3','-I','-c','import os;print(os.geteuid())'],scratch)
+                self.assertEqual(value.strip(),str(account.pw_uid))
+                with self.assertRaisesRegex(ValueError,'Database client permissions rejected'):
+                    host.run_as(identity,['/usr/bin/python3','-I','-c','print("must not run")'],scratch,database=True)
+        finally:host.cleanup(scratch)
 
     def test_actor_and_action_allowlist(self):
         for actor, admin in (('root', False), ('customer', True), ('root;id', True)):
