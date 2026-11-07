@@ -173,17 +173,39 @@ def wp(site, args, cwd, timeout=600, output=None):
     if args[:2] == ['db', 'export']:
         # WP-CLI intentionally skips client option files. Match PHP's local
         # socket when DB_HOST is localhost; preserve explicit remote/socket hosts.
-        connection = json.loads(wp(site, ['eval', "echo json_encode(array('host'=>DB_HOST,'socket'=>ini_get('mysqli.default_socket')));"], cwd))
-        if not isinstance(connection, dict) or set(connection) != {'host', 'socket'}:
-            raise ValueError('Cannot determine the WordPress database connection')
-        socket = connection['socket']
-        if connection['host'] == 'localhost' and socket:
-            if not isinstance(socket, str) or not socket.startswith('/') or len(socket) > 4096 or any(ord(c) < 32 for c in socket):
-                raise ValueError('Invalid local database socket')
-            args = [*args, '--socket=' + socket]
+        socket=database_socket(site,cwd)
+        if socket:args=[*args,'--socket='+socket]
     # This process is already the account UID before PHP or wp-config.php loads.
     return run_as(site, [site['php_bin'], wp_cli(), '--path=' + site['path'], '--skip-plugins',
         '--skip-themes', '--skip-packages', '--no-color', *args], cwd, timeout, output, database=args[:2] == ['db', 'export'])
+
+
+def database_socket(site,cwd):
+    connection=json.loads(wp(site,['eval',"echo json_encode(array('host'=>DB_HOST,'socket'=>ini_get('mysqli.default_socket')));"],cwd))
+    if not isinstance(connection,dict) or set(connection)!={'host','socket'}:raise ValueError('Cannot determine the WordPress database connection')
+    socket=connection['socket'] if connection['host']=='localhost' else ''
+    if socket and (not isinstance(socket,str) or not socket.startswith('/') or len(socket)>4096 or any(ord(c)<32 for c in socket)):
+        raise ValueError('Invalid local database socket')
+    return socket or ''
+
+
+def backup_task(site,operation,scratch,request,output=None):
+    if operation not in ('prepare','archive','commit','prune','read','delete_site'):raise ValueError('Invalid account backup operation')
+    payload={**request,'path':site['path']}
+    database=operation=='archive' and request.get('kind')=='database'
+    if database:payload.update(php=site['php_bin'],wp=wp_cli(),socket=database_socket(site,scratch))
+    raw=run_as(site,['/usr/bin/python3','-I','-B',SOURCE/'account_backups.py',operation,site['home'],json.dumps(payload)],
+               scratch,timeout=900,output=output,database=database)
+    return json.loads(raw) if output is None else None
+
+
+def private_backup_home(site):
+    target=Path(site['home'])/'.masswpupdate'
+    for row in native('domains'):
+        if row['user']!=site['owner']:continue
+        document_root=Path(row['path'])
+        if not document_root.is_absolute() or '..' in document_root.parts:raise ValueError('Invalid native document root')
+        if target.is_relative_to(document_root):raise ValueError('The account backup directory falls inside a Webuzo document root')
 
 
 @functools.lru_cache(maxsize=4096)

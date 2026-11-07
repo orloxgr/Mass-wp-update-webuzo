@@ -1,7 +1,7 @@
 <?php
 /*
 Plugin Name: Mass WP Update for Webuzo
-Version: 0.1.2
+Version: 0.2.0
 Description: Update WordPress sites and manage a private premium plugin library.
 Author: Byron Iniotakis
 Author URI: https://www.iniotakis.com
@@ -116,7 +116,7 @@ function mwu_send_download(array $result): void {
     $download = $result['download'] ?? [];
     $token = $download['token'] ?? '';
     $filename = $result['filename'] ?? '';
-    if (!is_string($token) || !preg_match('/^[0-9a-f]{64}$/D', $token) || !is_string($filename) || !preg_match('/^[0-9a-f]{32}-(plugins\.tar\.gz|themes\.tar\.gz|database\.sql|manifest\.json)$/D', $filename)) throw new RuntimeException('Invalid backup response.');
+    if (!is_string($token) || !preg_match('/^[0-9a-f]{64}$/D', $token) || !is_string($filename) || !preg_match('/^[0-9a-f]{32}-(plugins\.tar\.gz|themes\.tar\.gz|database\.sql|(?:plugins|themes|database)\.zip|manifest\.json)$/D', $filename)) throw new RuntimeException('Invalid backup response.');
     $path = '/var/lib/mass-wp-update-webuzo-downloads/' . $token . '.download';
     $handle = null;
     try {

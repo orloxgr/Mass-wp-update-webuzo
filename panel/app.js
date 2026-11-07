@@ -6,7 +6,7 @@
   const byId = id => document.getElementById('mwu-' + id);
   const options = ['core','plugins','premium','themes','backup_plugins','backup_themes','backup_database'];
   let snapshot = null, job = null, timer = null, uploading = false, resultsSignature = '';
-  let historyCursor = null;
+  let historyCursor = null, retentionLoaded = false, deleting = false;
   const selected = new Set();
   const demo = root.dataset.demo === '1';
   function element(tag, text, className) {
@@ -33,15 +33,16 @@
   }
   function active() { return job && ['queued','running'].includes(job.state); }
   function updateControls() {
-    byId('scan').disabled = demo || active();
-    byId('update').disabled = demo || active() || selected.size === 0 || !!(snapshot && snapshot.prerequisites);
+    byId('scan').disabled = demo || active() || deleting;
+    byId('update').disabled = demo || active() || deleting || selected.size === 0 || !!(snapshot && snapshot.prerequisites);
     byId('selection').textContent = selected.size + ' site(s) selected';
     root.querySelectorAll('[data-premium-update]').forEach(button => {
       const row = button.closest('.mwu-package-sites');
-      button.disabled = demo || active() || !row.querySelector('input:checked') || !!(snapshot && snapshot.prerequisites);
+      button.disabled = demo || active() || deleting || !row.querySelector('input:checked') || !!(snapshot && snapshot.prerequisites);
     });
     root.querySelectorAll('[data-upload-button]').forEach(button => { button.disabled = demo || uploading; });
     byId('add').disabled = demo || uploading;
+    root.querySelectorAll('[data-delete-backups]').forEach(button => { button.disabled = demo || active() || deleting; });
   }
   function choices(premiumOnly = false) {
     const result = {};
@@ -52,7 +53,7 @@
   async function run(ids, premium = null) {
     byId('error').hidden = true;
     try {
-      const result = await request({action:'update',sites:ids,options:choices(premium !== null),premium});
+      const result = await request({action:'update',sites:ids,options:choices(premium !== null),premium,keep_backups:Number(byId('keep-backups').value)});
       setTab('updates'); drawJob(result.job); schedule();
     } catch (error) { message(error.message, true); }
   }
@@ -69,13 +70,26 @@
       cell.append(check); row.append(cell);
       const name = element('td'); name.append(element('strong', site.domain), element('div', site.path, 'mwu-path')); row.append(name);
       row.append(element('td', site.owner), element('td', site.core || '—'), element('td', site.php || '—'), element('td', site.error || (site.multisite ? 'Ready · Multisite' : 'Ready'), site.error ? 'mwu-failure' : ''));
+      const backups = element('td'), remove = element('button', 'Delete backups'); remove.type = 'button'; remove.dataset.deleteBackups = site.id;
+      remove.setAttribute('aria-label', 'Delete backups for ' + site.domain);
+      remove.addEventListener('click', () => deleteBackups(site)); backups.append(remove); row.append(backups);
       body.append(row);
     }
-    if (!sites.length) { const row = element('tr'), cell = element('td', 'No sites listed yet. Click Refresh sites to discover WordPress installations.'); cell.colSpan = 6; row.append(cell); body.append(row); }
+    if (!sites.length) { const row = element('tr'), cell = element('td', 'No sites listed yet. Click Refresh sites to discover WordPress installations.'); cell.colSpan = 7; row.append(cell); body.append(row); }
     byId('site-count').textContent = sites.length + ' WordPress site(s)' + (snapshot.inventory.scanned_at ? ' · Last scan: ' + new Date(snapshot.inventory.scanned_at * 1000).toLocaleString() : '');
     const errors = byId('discovery-errors'); errors.replaceChildren();
     for (const item of snapshot.inventory.errors || []) errors.append(element('p', item.owner + ': ' + item.error, 'mwu-failure'));
     syncSelection();
+  }
+  async function deleteBackups(site) {
+    if (active() || deleting || !window.confirm('Delete all Mass WP Update backup sets for ' + site.domain + ' (' + site.path + ')?')) return;
+    deleting = true; updateControls(); byId('error').hidden = true;
+    try {
+      const result = await request({action:'delete_backups',site:site.id});
+      message(result.removed + ' backup set(s) deleted for ' + site.domain + '.' + (result.warnings.length ? ' Some backups could not be removed: ' + result.warnings.join('; ') : ''));
+      byId('history-results').replaceChildren(); await load();
+    } catch (error) { message(error.message, true); }
+    finally { deleting = false; updateControls(); }
   }
   function syncSelection() {
     const checks = [...byId('sites').querySelectorAll('input:not(:disabled)')];
@@ -212,7 +226,10 @@
         if (item.state === 'complete' && !item.actions.length) box.append(element('p', 'Completed. No update was needed.'));
         if (item.skipped && item.skipped.length) { const list = element('details'), title = element('summary', 'Premium plugin details'); list.append(title, element('p', item.skipped.join('\n'))); box.append(list); }
         if (item.error) box.append(element('pre', item.error));
-        if (item.backups && item.backups.length) {
+        if (item.backup_storage) box.append(element('p', item.backup_storage.directory, 'mwu-path'));
+        for (const warning of item.warnings || []) box.append(element('p', warning));
+        if (item.backup_removed) box.append(element('p', 'Backups removed by retention or an administrator.'));
+        if (!item.backup_removed && item.backups && item.backups.length) {
           const links = element('div', undefined, 'mwu-downloads');
           for (const file of [...item.backups, {name:'manifest.json'}]) {
             const button = element('button', 'Download ' + file.name); button.type = 'button';
@@ -248,6 +265,7 @@
   }
   async function load() {
     snapshot = await request({action:'status'});
+    if (!retentionLoaded) { byId('keep-backups').value = String(snapshot.settings.keep_backups); retentionLoaded = true; }
     renderSites(); renderPackages(); drawJob(snapshot.job);
     if (snapshot.prerequisites) message(snapshot.prerequisites, true);
     await history();

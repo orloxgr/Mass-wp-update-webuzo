@@ -59,11 +59,12 @@ def publish(identity, payload, suffix='.response'):
     finally: os.close(directory)
 
 
-def prepare_download(source):
+def prepare_download(source=None,writer=None,expected=None):
     """Copy a known backup to one private, short-lived panel-readable file."""
     import shutil
     panel = pwd.getpwnam('webuzo')
-    state.trusted(source)
+    if source is not None:state.trusted(source)
+    elif writer is None or expected is None:raise ValueError('Missing account backup reader')
     identity = secrets.token_hex(32)
     directory = os.open(state.DOWNLOADS, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     name = identity + '.download'
@@ -73,21 +74,28 @@ def prepare_download(source):
             raise ValueError('Untrusted panel transport')
         import time
         for previous in os.listdir(directory):
-            if not re.fullmatch('[0-9a-f]{64}\\.download', previous): continue
+            if not re.fullmatch(r'[0-9a-f]{64}\.download', previous): continue
             info = os.stat(previous,dir_fd=directory,follow_symlinks=False)
             if (stat.S_ISREG(info.st_mode) and info.st_uid == panel.pw_uid and info.st_nlink == 1 and
                     stat.S_IMODE(info.st_mode) == 0o600 and info.st_mtime < time.time() - 3600):
                 os.unlink(previous,dir_fd=directory)
         space = os.fstatvfs(directory)
-        size = source.stat().st_size
+        size = source.stat().st_size if source is not None else expected['bytes']
         if size + 256 * 1024 * 1024 > space.f_bavail * space.f_frsize:
             raise ValueError('Insufficient free space to prepare this download')
-        fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=directory)
+        fd = os.open(name, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=directory)
         try:
-            with os.fdopen(fd,'wb') as output, source.open('rb') as archive:
-                shutil.copyfileobj(archive,output,1024*1024)
+            with os.fdopen(fd,'w+b') as output:
+                if writer is not None:writer(output)
+                else:
+                    with source.open('rb') as archive:shutil.copyfileobj(archive,output,1024*1024)
                 output.flush(); os.fsync(output.fileno())
                 if os.fstat(output.fileno()).st_size != size: raise ValueError('Backup changed while preparing its download')
+                if expected is not None:
+                    import hashlib
+                    output.seek(0);checksum=hashlib.sha256()
+                    for block in iter(lambda:output.read(1024*1024),b''):checksum.update(block)
+                    if checksum.hexdigest()!=expected['sha256']:raise ValueError('Backup checksum changed since creation')
                 os.fchown(output.fileno(),panel.pw_uid,panel.pw_gid)
         except Exception:
             os.unlink(name,dir_fd=directory); raise

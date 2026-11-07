@@ -20,6 +20,7 @@ import jobs
 import lifecycle
 import state
 import transport
+import account_backups
 
 
 def plugin_zip(path, version='2.0.0', slug='example-premium', main='plugin.php', extra=None, headers=''):
@@ -161,6 +162,8 @@ class BackendTests(unittest.TestCase):
 
     def test_download_allowlist_and_private_staging(self):
         job, site = 'a' * 32, 'b' * 32
+        record=state.ROOT/'jobs'/job;state.mkdir(record)
+        state.save(record/'status.json',dict(results=[dict(site=site)]))
         folder = state.ROOT / 'backups' / job; state.mkdir(folder)
         folder /= site; state.mkdir(folder); state.write(folder / 'database.sql', b'example')
         result = self.api('download_prepare', job=job, site=site, name='database.sql')
@@ -169,7 +172,7 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(temporary.stat().st_uid,pwd.getpwnam('webuzo').pw_uid)
         self.assertEqual(stat.S_IMODE((folder/'database.sql').stat().st_mode),0o600)
         self.assertEqual((folder/'database.sql').stat().st_uid,0)
-        for bad in ('../../etc/passwd', '/etc/passwd', 'plugins.zip'):
+        for bad in ('../../etc/passwd', '/etc/passwd', 'arbitrary.zip'):
             with self.assertRaises(ValueError): self.api('download_prepare', job=job, site=site, name=bad)
         with self.assertRaises(ValueError): self.api('download_prepare', job='../escape', site=site, name='database.sql')
 
@@ -213,16 +216,71 @@ class BackendTests(unittest.TestCase):
 
     def test_backup_failure_keeps_completed_backup_manifest(self):
         identity='a'*32;path=state.ROOT/'jobs'/identity;state.mkdir(path)
-        site=dict(id='b'*32,domain='example.test',path='/home/example/public_html')
-        completed=[]
-        def backup(account, operation, cwd, path, output):
-            if operation=='themes': raise RuntimeError('Unreadable theme')
-            output.write(b'completed plugin archive')
-        with patch.object(host,'account_task',side_effect=backup):
+        site=dict(id='b'*32,domain='example.test',path='/home/example/public_html',home='/home/example')
+        result=dict(backups=[]);calls=[]
+        def backup(account, operation, cwd, payload):
+            calls.append(operation)
+            if operation=='archive' and payload['kind']=='themes':raise RuntimeError('Unreadable theme')
+            return dict(file=dict(name='plugins.zip',bytes=100,sha256='c'*64),manifest=dict(name='manifest.json',bytes=200,sha256='d'*64))
+        with patch.object(host,'private_backup_home'),patch.object(host,'backup_task',side_effect=backup):
             with self.assertRaisesRegex(RuntimeError,'Unreadable theme'):
-                jobs.backups(site,dict(backup_plugins=True,backup_themes=True,backup_database=True),path,self.base,lambda msg:None,completed)
-        self.assertEqual([f['name'] for f in completed],['plugins.tar.gz'])
-        self.assertEqual(state.read(state.ROOT/'backups'/identity/site['id']/'manifest.json')['files'],completed)
+                jobs.backups(site,dict(options=dict(backup_plugins=True,backup_themes=True,backup_database=True)),path,self.base,lambda msg:None,result)
+        self.assertEqual([f['name'] for f in result['backups']],['plugins.zip'])
+        self.assertNotIn('prune',calls);self.assertNotIn('commit',calls)
+
+    def test_retention_rejects_out_of_range_and_non_integer_values(self):
+        state.save(state.ROOT/'inventory.json',dict(sites={'a'*32:dict(id='a'*32)}))
+        for keep in (0,11,True,'2',1.5):
+            with self.subTest(keep=keep),self.assertRaisesRegex(ValueError,'1 to 10'):
+                jobs.start('update',['a'*32],{key:True for key in jobs.OPTIONS},keep_backups=keep)
+
+    def test_delete_backups_is_site_scoped_and_refuses_running_jobs(self):
+        site=dict(id='b'*32,owner='example',home='/home/example',path='/home/example/public_html')
+        state.save(state.ROOT/'inventory.json',dict(sites={site['id']:site}))
+        with patch.object(jobs,'current',return_value=dict(state='running')),patch.object(host,'backup_task') as task:
+            with self.assertRaisesRegex(ValueError,'current job'):self.api('delete_backups',site=site['id'])
+            task.assert_not_called()
+        removed=site['id']+'/2026/01/01/120000-'+'c'*32
+        with patch.object(host,'work',return_value=self.base),patch.object(host,'cleanup'),patch.object(host,'backup_task',return_value=dict(removed=[removed],warnings=[])) as task:
+            self.assertEqual(self.api('delete_backups',site=site['id'])['removed'],1)
+            task.assert_called_once_with(site,'delete_site',self.base,{})
+        self.assertIn(removed,state.read(state.ROOT/'retired-backups.json'))
+        with self.assertRaises(ValueError):self.api('delete_backups',site='../other')
+        with self.assertRaises(ValueError):self.api('delete_backups',site='c'*32)
+        with self.assertRaises(ValueError):self.api('delete_backups',site=site['id'],path='/etc')
+
+    def test_account_download_rejects_changed_content_and_cleans_staging(self):
+        import hashlib
+        expected=dict(name='plugins.zip',bytes=4,sha256=hashlib.sha256(b'good').hexdigest())
+        before=set(state.DOWNLOADS.iterdir())
+        with self.assertRaisesRegex(ValueError,'checksum'):
+            transport.prepare_download(writer=lambda output:output.write(b'evil'),expected=expected)
+        self.assertEqual(set(state.DOWNLOADS.iterdir()),before)
+        result=transport.prepare_download(writer=lambda output:output.write(b'good'),expected=expected)
+        self.assertEqual((state.DOWNLOADS/(result['token']+'.download')).read_bytes(),b'good')
+
+    def test_backup_helper_refuses_root_and_nonmatching_site_locations(self):
+        with patch.object(sys,'argv',['helper','delete_site','/root',json.dumps(dict(path='/root/site'))]):
+            with self.assertRaisesRegex(ValueError,'non-root'):account_backups.main()
+        for invalid in ('../etc','a'*32+'/../../etc','a'*32+'/2026/01/01/120000-'+'b'*32+'/extra'):
+            with self.assertRaises(ValueError):account_backups.directory('/home/example',invalid)
+
+    def test_backup_home_cannot_be_inside_a_native_document_root(self):
+        site=dict(owner='example',home='/home/example')
+        with patch.object(host,'native',return_value=[dict(user='example',path='/home/example')]):
+            with self.assertRaisesRegex(ValueError,'document root'):host.private_backup_home(site)
+        with patch.object(host,'native',return_value=[dict(user='example',path='/home/example/public_html')]):
+            host.private_backup_home(site)
+
+    def test_real_account_backup_storage_retention_and_deletion(self):
+        account=pwd.getpwnam('nobody')
+        identity=dict(owner=account.pw_name,uid=account.pw_uid,gid=account.pw_gid,home=account.pw_dir)
+        self.base.chmod(0o711)
+        scratch=host.work(identity)
+        try:
+            value=host.run_as(identity,['/usr/bin/python3','-I','-B',Path(__file__).with_name('backup_storage_probe.py'),scratch],scratch)
+            self.assertIn('Unprivileged ZIP',value)
+        finally:host.cleanup(scratch)
 
     def test_chunk_upload_offsets_and_finish(self):
         raw = plugin_zip(self.base / 'input.zip').read_bytes()

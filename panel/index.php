@@ -21,12 +21,16 @@
         <label><input type="checkbox" data-option="backup_plugins" checked> Backup plugins</label>
         <label><input type="checkbox" data-option="backup_themes" checked> Backup themes</label>
         <label><input type="checkbox" data-option="backup_database" checked> Backup database</label>
+        <label for="mwu-keep-backups">Keep latest backups per site
+          <select id="mwu-keep-backups"><?php for ($keep = 1; $keep <= 10; $keep++) { ?><option value="<?= $keep ?>"><?= $keep ?></option><?php } ?></select>
+        </label>
         <p class="mwu-help">Selected backups run before updates. If a backup fails, that site's updates stop.</p>
+        <p class="mwu-help">Older backup sets are removed only after the new set finishes successfully.</p>
       </fieldset>
     </div>
     <div class="mwu-toolbar"><button type="button" id="mwu-scan">Refresh sites</button><span id="mwu-site-count"></span></div>
     <div id="mwu-discovery-errors"></div>
-    <div class="mwu-scroll"><table><thead><tr><th><input type="checkbox" id="mwu-select-all" aria-label="Select all sites"></th><th>Site</th><th>Account</th><th>WordPress</th><th>PHP</th><th>Status</th></tr></thead><tbody id="mwu-sites"></tbody></table></div>
+    <div class="mwu-scroll"><table><thead><tr><th><input type="checkbox" id="mwu-select-all" aria-label="Select all sites"></th><th>Site</th><th>Account</th><th>WordPress</th><th>PHP</th><th>Status</th><th>Backups</th></tr></thead><tbody id="mwu-sites"></tbody></table></div>
     <div class="mwu-toolbar"><button type="button" class="mwu-primary" id="mwu-update">Update selected sites</button><span id="mwu-selection"></span></div>
     <section class="mwu-job" id="mwu-job" hidden aria-live="polite">
       <h3>Activity</h3><p id="mwu-job-status"></p>

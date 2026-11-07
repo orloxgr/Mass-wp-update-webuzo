@@ -41,7 +41,7 @@ def current():
     return job
 
 
-def start(kind, ids=None, options=None, premium=None):
+def start(kind, ids=None, options=None, premium=None, keep_backups=None):
     previous = current()
     if previous and previous['state'] in ('queued', 'running'): raise ValueError('A job is already running; wait for it to finish')
     if kind not in ('scan', 'update'): raise ValueError('Invalid job kind')
@@ -54,13 +54,15 @@ def start(kind, ids=None, options=None, premium=None):
         if not isinstance(options, dict) or set(options) != set(OPTIONS) or any(type(v) is not bool for v in options.values()):
             raise ValueError('Invalid update or backup options')
         if not any(options.values()): raise ValueError('Choose at least one update or backup action')
+        if keep_backups is None:keep_backups=state.read(state.ROOT/'settings.json',{}).get('keep_backups',1)
+        if type(keep_backups) is not int or not 1<=keep_backups<=10:raise ValueError('Choose 1 to 10 backups to keep')
         if premium is not None:
             catalog.component(premium)
             if premium not in packages: raise ValueError('Unknown premium plugin')
             if not options['premium'] or any(options[key] for key in ('core', 'plugins', 'themes')):
                 raise ValueError('A premium-plugin action may update only that plugin')
             packages = {premium: packages[premium]}
-        request.update(sites=[source[i] for i in dict.fromkeys(ids)], options=options, packages=packages)
+        request.update(sites=[source[i] for i in dict.fromkeys(ids)], options=options, packages=packages,keep_backups=keep_backups)
     identity = secrets.token_hex(16)
     path = state.ROOT / 'jobs' / identity
     state.mkdir(path)
@@ -74,36 +76,47 @@ def start(kind, ids=None, options=None, premium=None):
     job['pid'] = pid
     state.save(path / 'status.json', job)
     state.save(state.ROOT / 'latest.json', {'id': identity})
+    if kind=='update':state.save(state.ROOT/'settings.json',dict(keep_backups=keep_backups))
     return job
 
 
-def backups(site, options, path, scratch, progress, completed=None):
-    target = state.ROOT / 'backups' / path.name
-    state.mkdir(target)
-    target /= site['id']; state.mkdir(target)
-    files = completed if completed is not None else []
+def backup_record(value,expected):
+    import re
+    if (not isinstance(value,dict) or set(value)!={'name','bytes','sha256'} or value['name']!=expected
+            or type(value['bytes']) is not int or value['bytes']<=0
+            or not isinstance(value['sha256'],str) or not re.fullmatch('[0-9a-f]{64}',value['sha256'])):
+        raise ValueError('Invalid account backup response')
+    return value
+
+
+def backups(site, request, path, scratch, progress, result):
+    options=request['options']
+    selected=[kind+'.zip' for kind in ('plugins','themes','database') if options['backup_'+kind]]
+    if not selected:return
+    host.private_backup_home(site)
+    location=site['id']+'/'+time.strftime('%Y/%m/%d/%H%M%S-')+path.name
+    result['backup_storage']=dict(location=location,directory=str(Path(site['home'])/'.masswpupdate'/location))
+    host.backup_task(site,'prepare',scratch,dict(location=location,selected=selected))
     for kind in ('plugins', 'themes', 'database'):
         if not options['backup_' + kind]: continue
         progress('Backing up ' + kind + ' for ' + site['domain'])
-        name = kind + ('.sql' if kind == 'database' else '.tar.gz')
-        destination = target / name
-        fd = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
-        try:
-            with os.fdopen(fd, 'wb') as output:
-                if kind == 'database': host.wp(site, ['db', 'export', '-', '--quiet'], scratch, output=output)
-                else: host.account_task(site, kind, scratch, site['path'], output=output)
-                output.flush(); os.fsync(output.fileno())
-            if destination.stat().st_size == 0: raise ValueError('Backup is empty')
-            digest = hashlib.sha256()
-            with destination.open('rb') as data:
-                for block in iter(lambda: data.read(1024 * 1024), b''): digest.update(block)
-            files.append(dict(name=name, bytes=destination.stat().st_size, sha256=digest.hexdigest()))
-            state.save(target / 'manifest.json', dict(site=site['id'], domain=site['domain'], created=time.time(), files=files))
-        except Exception:
-            destination.unlink(missing_ok=True)
-            raise
-    state.save(target / 'manifest.json', dict(site=site['id'], domain=site['domain'], created=time.time(), files=files))
-    return files
+        saved=host.backup_task(site,'archive',scratch,dict(location=location,kind=kind))
+        result['backups'].append(backup_record(saved['file'],kind+'.zip'))
+        result['backup_manifest']=backup_record(saved['manifest'],'manifest.json')
+    saved=host.backup_task(site,'commit',scratch,dict(location=location))
+    result['backup_manifest']=backup_record(saved['manifest'],'manifest.json')
+    try:
+        retired=host.backup_task(site,'prune',scratch,dict(location=location,keep=request.get('keep_backups',1)))
+        index=state.read(state.ROOT/'retired-backups.json',{})
+        import account_backups
+        for removed in retired['removed']:
+            if not isinstance(removed,str) or not account_backups.SNAPSHOT.fullmatch(removed) or not removed.startswith(site['id']+'/') or removed==location:
+                raise ValueError('Invalid backup retention response')
+            index[removed]=time.time()
+        state.save(state.ROOT/'retired-backups.json',index)
+        if retired['warnings']:result.setdefault('warnings',[]).append('Some older backups were kept: '+'; '.join(retired['warnings']))
+    except Exception as error:
+        result.setdefault('warnings',[]).append('Backup completed, but older backups could not be pruned: '+str(error))
 
 
 def premium_plan(site, inventory, packages):
@@ -133,7 +146,7 @@ def update_site(site, request, path, progress):
         if site.get('error'): raise ValueError('Refresh sites after resolving this site\'s inventory error')
         before = host.inventory(site, scratch)
         result['before'] = before['core']
-        backups(site, request['options'], path, scratch, progress, result['backups'])
+        backups(site, request, path, scratch, progress, result)
         options = request['options']
         # Regular updates exclude all packages in the library, preserving ZIP control.
         commands = []

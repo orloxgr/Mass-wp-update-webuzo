@@ -6,14 +6,30 @@ Update WordPress sites from the Webuzo administrator panel and keep your premium
 
 1. Click **Refresh sites** to find WordPress installations in active hosting accounts.
 2. Select the sites and the actions: **WordPress core**, **plugins**, **premium plugins**, and **themes**.
-3. Choose whether to back up **plugins**, **themes**, and the **database**.
+3. Choose whether to back up **plugins**, **themes**, and the **database**, and how many backup sets to keep per site (1–10, default 1).
 4. Click **Update selected sites**.
 
 Sites run one at a time. Selected backups finish before that site's updates begin; a failed backup stops updates for that site. Activity shows completed actions, skipped premium updates, errors, and backup downloads. **Previous updates & backups** keeps earlier results and downloads available. **Stop after current site** lets the current site finish before the next one starts.
 
 Core updates include the WordPress database update, across the network for Multisite. Each row represents one WordPress installation; updates to a Multisite installation affect its shared files and network. Regular plugin updates exclude plugins registered in the premium library. Premium updates use your uploaded packages, apply only to matching installed plugins with an older version, and check their declared WordPress, PHP, and plugin dependencies. Plugins are not activated automatically.
 
-Backups contain the selected `wp-content/plugins` and `wp-content/themes` directories and/or a SQL database export. They are not a complete site backup or an automatic rollback. They stay in `/var/lib/mass-wp-update-webuzo/backups`, accessible only to root and the authenticated administrator's download actions. Earlier backups remain on the server when another job starts.
+Backups are stored under the hosting account's home, outside its Webuzo document roots:
+
+```text
+~/.masswpupdate/<site-id>/YYYY/MM/DD/HHMMSS-<job-id>/
+    plugins.zip
+    themes.zip
+    database.zip
+    manifest.json
+```
+
+Only the selected ZIPs are created. `database.zip` contains `database.sql`; the other ZIPs contain the selected `wp-content/plugins` or `wp-content/themes` directory. Each WordPress installation has a separate site ID, including installations within the same account. Dates use the server's local time. Files belong to the hosting account with permissions 600; backup directories use 700. Backups count toward the account's disk quota. They are not a complete site backup or an automatic rollback.
+
+**Keep latest backups per site** keeps the newest 1–10 backup sets, including the set just created. The choice is remembered for subsequent jobs. Older sets are removed only after every selected backup for that site finishes successfully. A failed backup preserves the previous completed sets and stops that site's updates. Activity reports any files that could not be removed.
+
+Each site row has **Delete backups**, with confirmation for that specific WordPress installation. It removes that site's managed backup sets without touching another installation's backups. Deletion is unavailable while a job is running. Files with unexpected names, ownership, permissions or links are left in place and reported. Download links disappear from job results when their backups are removed by retention or an administrator.
+
+Backups made by versions before 0.2.0 remain in their original root-private storage and available through their previous job results. They are not migrated or removed by the account-storage retention and deletion controls.
 
 ## Premium plugins
 

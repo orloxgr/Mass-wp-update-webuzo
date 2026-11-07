@@ -31,7 +31,7 @@ def main():
     if operation == 'discover':
         paths = []
         for folder, dirs, files in os.walk(home, followlinks=False):
-            dirs[:] = [d for d in dirs if d not in ('wp-content', 'wp-admin', 'wp-includes', 'node_modules', 'vendor', '.git', '.cache')
+            dirs[:] = [d for d in dirs if d not in ('wp-content', 'wp-admin', 'wp-includes', 'node_modules', 'vendor', '.git', '.cache', '.masswpupdate')
                        and not (Path(folder) / d).is_symlink()]
             if 'wp-load.php' in files:
                 try: check(home, folder)

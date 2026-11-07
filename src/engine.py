@@ -10,12 +10,30 @@ import host
 import jobs
 import state
 import transport
+import account_backups
 
-FIELDS = {'status': set(), 'job_status': set(), 'scan': set(), 'update': {'sites', 'options', 'premium'},
+FIELDS = {'status': set(), 'job_status': set(), 'scan': set(), 'update': {'sites', 'options', 'premium','keep_backups'},
           'history': {'before'}, 'job_details': {'job'},
           'cancel': {'job'}, 'upload_begin': {'size', 'replace'},
           'upload_chunk': {'upload', 'part', 'offset'}, 'upload_finish': {'upload'}, 'upload_abort': {'upload'},
-          'download_prepare': {'job', 'site', 'name'}}
+          'download_prepare': {'job', 'site', 'name'}, 'delete_backups': {'site'}}
+
+
+def decorate_job(job):
+    if job:
+        retired=state.read(state.ROOT/'retired-backups.json',{})
+        for result in job.get('results',[]):
+            if result.get('backup_storage',{}).get('location') in retired:result['backup_removed']=True
+    return job
+
+
+def retire(site,removed):
+    index=state.read(state.ROOT/'retired-backups.json',{})
+    for location in removed:
+        if not isinstance(location,str) or not account_backups.SNAPSHOT.fullmatch(location) or not location.startswith(site+'/'):
+            raise ValueError('Invalid backup removal response')
+        index[location]=time.time()
+    state.save(state.ROOT/'retired-backups.json',index)
 
 
 def status():
@@ -29,11 +47,12 @@ def status():
                 package['sites'].append(dict(id=site['id'], domain=site['domain'], owner=site['owner'],
                     version=plugin['version'], newer=host.compare(package['version'], plugin['version']) > 0,
                     error=site.get('error', '')))
-    job = jobs.current()
+    job = decorate_job(jobs.current())
     prerequisites = ''
     try: host.wp_cli()
     except Exception as error: prerequisites = str(error)
-    return dict(ok=True, inventory=inventory, packages=packages, job=job, prerequisites=prerequisites)
+    return dict(ok=True, inventory=inventory, packages=packages, job=job, prerequisites=prerequisites,
+                settings=state.read(state.ROOT/'settings.json',dict(keep_backups=1)))
 
 
 def upload_path(identity):
@@ -50,8 +69,8 @@ def dispatch(request):
         raise ValueError('Unsupported action or parameters')
     if not state.read(state.ROOT / 'active.json', {}).get('active'): raise ValueError('The plugin is not active')
     if action == 'status': return status()
-    if action == 'job_status': return dict(ok=True, job=jobs.current())
-    if action == 'job_details': return dict(ok=True, job=state.read(jobs.directory(request.get('job')) / 'status.json'))
+    if action == 'job_status': return dict(ok=True, job=decorate_job(jobs.current()))
+    if action == 'job_details': return dict(ok=True, job=decorate_job(state.read(jobs.directory(request.get('job')) / 'status.json')))
     if action == 'history':
         before = request.get('before')
         if before is not None and (not isinstance(before, list) or len(before) != 2 or
@@ -71,7 +90,18 @@ def dispatch(request):
         return dict(ok=True, jobs=page, next_cursor=cursor)
     if action == 'scan': return dict(ok=True, job=jobs.start('scan'))
     if action == 'update':
-        return dict(ok=True, job=jobs.start('update', request.get('sites'), request.get('options'), request.get('premium')))
+        return dict(ok=True, job=jobs.start('update', request.get('sites'), request.get('options'), request.get('premium'),request.get('keep_backups')))
+    if action == 'delete_backups':
+        current=jobs.current()
+        if current and current['state'] in ('queued','running'):raise ValueError('Wait for the current job to finish before deleting backups')
+        identity=state.identity(request.get('site'))
+        site=state.read(state.ROOT/'inventory.json',dict(sites={}))['sites'].get(identity)
+        if not site:raise ValueError('Select a site from the current inventory')
+        scratch=host.work(site)
+        try:result=host.backup_task(site,'delete_site',scratch,{})
+        finally:host.cleanup(scratch)
+        retire(identity,result['removed'])
+        return dict(ok=True,removed=len(result['removed']),warnings=result['warnings'])
     if action == 'cancel':
         current = jobs.current()
         if not current or current['id'] != request.get('job') or current['state'] not in ('queued', 'running'):
@@ -122,8 +152,26 @@ def dispatch(request):
     if action == 'download_prepare':
         job, site = state.identity(request.get('job')), state.identity(request.get('site'))
         name = request.get('name')
-        if name not in ('plugins.tar.gz', 'themes.tar.gz', 'database.sql', 'manifest.json'):
+        if name not in ('plugins.tar.gz', 'themes.tar.gz', 'database.sql', 'manifest.json','plugins.zip','themes.zip','database.zip'):
             raise ValueError('Invalid backup selection')
+        job_path=jobs.directory(job)
+        record=state.read(job_path/'status.json')
+        result=next((value for value in record.get('results',[]) if value.get('site')==site),None)
+        if not result:raise ValueError('No backups recorded for this site and job')
+        if result.get('backup_storage'):
+            location=result['backup_storage']['location']
+            if location in state.read(state.ROOT/'retired-backups.json',{}):raise ValueError('These backups have been deleted')
+            if not account_backups.SNAPSHOT.fullmatch(location) or not location.startswith(site+'/'):raise ValueError('Invalid backup location')
+            expected=result.get('backup_manifest') if name=='manifest.json' else next((f for f in result.get('backups',[]) if f['name']==name),None)
+            expected=jobs.backup_record(expected,name)
+            owner=next((value for value in state.read(job_path/'request.json')['sites'] if value['id']==site),None)
+            if not owner:raise ValueError('No hosting account recorded for these backups')
+            scratch=host.work(owner)
+            try:
+                receipt=transport.prepare_download(writer=lambda output:host.backup_task(owner,'read',scratch,
+                    dict(location=location,name=name,bytes=expected['bytes']),output),expected=expected)
+            finally:host.cleanup(scratch)
+            return dict(ok=True,download=receipt,filename=site+'-'+name)
         path = state.ROOT / 'backups' / job / site / name
         state.trusted(path)
         return dict(ok=True, download=transport.prepare_download(path), filename=site + '-' + name)
