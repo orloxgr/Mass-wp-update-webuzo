@@ -6,9 +6,10 @@
   const byId = id => document.getElementById('mwu-' + id);
   const options = ['core','plugins','premium','themes','backup_plugins','backup_themes','backup_database'];
   let snapshot = null, job = null, timer = null, uploading = false, resultsSignature = '';
-  let historyCursor = null, retentionLoaded = false, deleting = false;
+  let historyCursor = null, settingsLoaded = false, deleting = false, settingsQueue = Promise.resolve();
   const selected = new Set();
   const demo = root.dataset.demo === '1';
+  root.querySelectorAll('[data-option], #mwu-keep-backups').forEach(input => { input.disabled = true; });
   function element(tag, text, className) {
     const node = document.createElement(tag);
     if (text !== undefined) node.textContent = String(text);
@@ -28,11 +29,22 @@
     target.textContent = text || ''; target.hidden = !text;
     if (error) byId('notice').hidden = true;
   }
-  async function request(payload, chunk) {
+  function errorView(item) {
+    const raw = item.error || '', summary = item.error_summary || raw.split('\n')[0];
+    const box = element('div', undefined, 'mwu-error-info');
+    box.append(element('div', summary, 'mwu-failure'));
+    if (raw !== summary || raw.includes('\n')) {
+      const details = element('details', undefined, 'mwu-error-details');
+      details.append(element('summary', 'Technical details'), element('pre', raw));
+      box.append(details);
+    }
+    return box;
+  }
+  async function request(payload, chunk, keepalive = false) {
     const body = new FormData();
     body.append('token', root.dataset.token); body.append('payload', JSON.stringify(payload));
     if (chunk) body.append('chunk', chunk, 'chunk.bin');
-    const response = await fetch(window.location.href, {method:'POST',credentials:'same-origin',headers:{'X-MWU-Request':'1'},body,cache:'no-store'});
+    const response = await fetch(window.location.href, {method:'POST',credentials:'same-origin',headers:{'X-MWU-Request':'1'},body,cache:'no-store',keepalive});
     let result;
     try { result = await response.json(); }
     catch (error) { throw new Error('The panel returned an unexpected response. Reload the page and check the job status before retrying.'); }
@@ -59,9 +71,17 @@
     if (premiumOnly) { result.core = false; result.plugins = false; result.themes = false; result.premium = true; }
     return result;
   }
+  function saveSettings() {
+    if (demo || !settingsLoaded) return;
+    const payload = {action:'save_settings',options:choices(),keep_backups:Number(byId('keep-backups').value)};
+    settingsQueue = settingsQueue.then(() => request(payload, null, true)).catch(error => {
+      message('Could not save preferences: ' + error.message, true);
+    });
+  }
   async function run(ids, premium = null) {
     byId('error').hidden = true;
     try {
+      await settingsQueue;
       const result = await request({action:'update',sites:ids,options:choices(premium !== null),premium,keep_backups:Number(byId('keep-backups').value)});
       setTab('updates'); drawJob(result.job); schedule();
     } catch (error) { message(error.message, true); }
@@ -79,7 +99,8 @@
       cell.append(check); row.append(cell);
       const name = element('td'), title = element('strong'); title.append(siteLink(site));
       name.append(title, element('div', site.path, 'mwu-path')); row.append(name);
-      row.append(element('td', site.owner), element('td', site.core || '—'), element('td', site.php || '—'), element('td', site.error || (site.multisite ? 'Ready · Multisite' : 'Ready'), site.error ? 'mwu-failure' : ''));
+      row.append(element('td',site.owner),element('td',site.core||'—'),element('td',site.php||'—'));
+      const status=element('td');status.append(site.error?errorView(site):element('span',site.multisite?'Ready · Multisite':'Ready'));row.append(status);
       const backups = element('td'), remove = element('button', 'Delete backups'); remove.type = 'button'; remove.dataset.deleteBackups = site.id;
       remove.setAttribute('aria-label', 'Delete backups for ' + site.domain);
       remove.addEventListener('click', () => deleteBackups(site)); backups.append(remove); row.append(backups);
@@ -88,7 +109,7 @@
     if (!sites.length) { const row = element('tr'), cell = element('td', 'No sites listed yet. Click Refresh sites to discover WordPress installations.'); cell.colSpan = 7; row.append(cell); body.append(row); }
     byId('site-count').textContent = sites.length + ' WordPress site(s)' + (snapshot.inventory.scanned_at ? ' · Last scan: ' + new Date(snapshot.inventory.scanned_at * 1000).toLocaleString() : '');
     const errors = byId('discovery-errors'); errors.replaceChildren();
-    for (const item of snapshot.inventory.errors || []) errors.append(element('p', item.owner + ': ' + item.error, 'mwu-failure'));
+    for(const item of snapshot.inventory.errors||[]){const box=element('div');box.append(element('strong',item.owner),errorView(item));errors.append(box);}
     syncSelection();
   }
   async function deleteBackups(site) {
@@ -135,7 +156,7 @@
       const row = element('tr'), name = element('td');
       name.append(element('strong', item.name), element('div', item.plugin_file, 'mwu-path'));
       if (item.author) name.append(element('div', item.author, 'mwu-path'));
-      row.append(name, element('td', item.pending ? 'Waiting for premium ZIP' : item.version, item.pending ? 'mwu-waiting' : ''));
+      row.append(name, element('td', item.pending ? 'Awaiting premium ZIP' : item.version, item.pending ? 'mwu-waiting' : ''));
       const replaceCell = element('td'), input = uploadInput(item.slug), replace = element('button', item.pending ? 'Upload ZIP' : 'Replace ZIP');
       replace.type = 'button'; replace.dataset.uploadButton = '1'; replace.addEventListener('click', () => input.click());
       replaceCell.append(replace, input); row.append(replaceCell);
@@ -146,7 +167,7 @@
       remove.addEventListener('click', () => deletePremium(item)); deleteCell.append(remove); row.append(deleteCell); body.append(row);
       const detailsRow = element('tr'); detailsRow.hidden = true;
       const details = element('td', undefined, 'mwu-package-sites'); details.colSpan = 5;
-      details.append(element('h4', item.name + (item.pending ? ' · Waiting for premium ZIP' : ' · Available version ' + item.version)));
+      details.append(element('h4', item.name + (item.pending ? ' · Awaiting premium ZIP' : ' · Available version ' + item.version)));
       if (item.pending) details.append(element('p', 'Upload the vendor’s installable ZIP to make this plugin available for updates.'));
       if (!item.sites.length) details.append(element('p', 'No installed copies found. Refresh sites after installing this plugin on a site.'));
       const eligible = [];
@@ -157,8 +178,8 @@
         check.addEventListener('change', updateControls);
         const description = element('span'); description.append(siteLink(site), document.createTextNode(' · ' + site.owner + ' · Installed ' + site.version));
         label.append(check, description);
-        if (site.error) label.append(element('span', site.error, 'mwu-failure'));
-        else if (item.pending) label.append(element('span', 'Waiting for premium ZIP', 'mwu-badge'));
+        if (site.error) label.append(errorView(site));
+        else if (item.pending) label.append(element('span', 'Awaiting premium ZIP', 'mwu-badge'));
         else if (!site.newer) label.append(element('span', 'Current or newer', 'mwu-badge'));
         details.append(label);
       }
@@ -236,6 +257,9 @@
   function drawJob(value) {
     job = value; byId('job').hidden = !job;
     if (!job) { updateControls(); return; }
+    const siteProgress=byId('site-progress');
+    siteProgress.hidden=job.kind!=='update'||!Number.isInteger(job.site_total)||job.site_total<1;
+    siteProgress.textContent=siteProgress.hidden?'':'Website '+job.site_index+'/'+job.site_total;
     byId('job-status').textContent = job.message;
     byId('stop').hidden = !active();
     byId('stop').textContent = job.kind === 'scan' ? 'Stop scan' : 'Stop after current site';
@@ -254,8 +278,8 @@
         if (item.actions && item.actions.length) box.append(element('p', 'Completed: ' + item.actions.join(', ')));
         if (item.state === 'complete' && !item.actions.length) box.append(element('p', 'Completed. No update was needed.'));
         if (item.skipped && item.skipped.length) { const list = element('details'), title = element('summary', 'Skipped plugin updates'); list.append(title, element('p', item.skipped.join('\n'))); box.append(list); }
-        if (item.error) box.append(element('pre', item.error));
-        if (item.pending_premium && item.pending_premium.length) box.append(element('p', 'Added to premium library · Waiting for premium ZIP: ' + item.pending_premium.join(', ')));
+        if (item.error) box.append(errorView(item));
+        if (item.pending_premium && item.pending_premium.length) box.append(element('p', 'Added to premium library · Awaiting premium ZIP: ' + item.pending_premium.join(', ')));
         if (item.backup_storage) box.append(element('p', item.backup_storage.directory, 'mwu-path'));
         for (const warning of item.warnings || []) box.append(element('p', warning));
         if (item.backup_removed) box.append(element('p', 'Backups removed by retention or an administrator.'));
@@ -295,7 +319,7 @@
   }
   async function load() {
     snapshot = await request({action:'status'});
-    if (!retentionLoaded) { byId('keep-backups').value = String(snapshot.settings.keep_backups); retentionLoaded = true; }
+    if(!settingsLoaded){byId('keep-backups').value=String(snapshot.settings.keep_backups);for(const key of options)root.querySelector('[data-option="'+key+'"]').checked=snapshot.settings.options[key];settingsLoaded=true;root.querySelectorAll('[data-option], #mwu-keep-backups').forEach(input=>{input.disabled=demo;});}
     renderSites(); renderPackages(); drawJob(snapshot.job);
     if (snapshot.prerequisites) message(snapshot.prerequisites, true);
     await history();
@@ -325,6 +349,7 @@
     for (const site of Object.values(snapshot.inventory.sites)) if (!site.error) { if (event.target.checked) selected.add(site.id); else selected.delete(site.id); }
     syncSelection();
   });
+  root.querySelectorAll('[data-option], #mwu-keep-backups').forEach(input=>input.addEventListener('change',saveSettings));
   byId('update').addEventListener('click', () => run([...selected]));
   byId('stop').addEventListener('click', async () => {
     try { const result = await request({action:'cancel',job:job.id}); message(result.message); }

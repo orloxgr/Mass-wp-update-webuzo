@@ -4,12 +4,16 @@ Update WordPress sites from the Webuzo administrator panel and keep your premium
 
 ## Updates
 
-1. Click **Refresh sites** to find WordPress installations in active hosting accounts.
+1. Click **Refresh sites** to find WordPress installations within the document roots of active Webuzo domains.
 2. Select the sites and the actions: **WordPress core**, **plugins**, **premium plugins**, and **themes**.
 3. Choose whether to back up **plugins**, **themes**, and the **database**, and how many backup sets to keep per site (1–10, default 1).
 4. Click **Update selected sites**.
 
 Sites run one at a time. Selected backups finish before that site's updates begin; a failed backup stops updates for that site. Activity shows completed actions, skipped premium updates, errors, and backup downloads. **Previous updates & backups** keeps earlier results and downloads available. **Stop after current site** lets the current site finish before the next one starts.
+
+Update and backup choices, including retention, save automatically on the server and return after refresh or a new login. Theme updates start enabled; an explicit disabled choice is retained. Changed choices apply to future jobs. Premium-only actions keep the general choices unchanged.
+
+Activity shows **Website N/total**, including failed sites. Errors have a short cause and expandable **Technical details** with the complete recorded output, including older history.
 
 Site names in the Updates list and premium plugin site lists open the WordPress home page in a new tab.
 
@@ -43,9 +47,9 @@ Uploading or replacing a ZIP never updates a site automatically. Running jobs ke
 
 **Delete** removes that plugin from the premium library and deletes its uploaded ZIP versions after confirmation. Installed plugins on sites and site backups are kept. Deletion is unavailable while an update job is using the library.
 
-When a regular plugin update fails with a license/subscription requirement, or an external update provider refuses access or supplies no downloadable package, the plugin is added once to the library as **Waiting for premium ZIP**. **View sites** shows installed copies and versions. Use **Upload ZIP**, or include the ZIP in a bulk upload, to fill the waiting entry. The directory and main plugin file must match. The row then becomes a regular library entry with the ZIP's version and update controls.
+When a regular plugin update fails with a license/subscription requirement, or an external update provider refuses access or supplies no downloadable package, the plugin is added once to the library as **Awaiting premium ZIP**. **View sites** shows installed copies and versions. Use **Upload ZIP**, or include the ZIP in a bulk upload, to fill the waiting entry. The directory and main plugin file must match. The row then becomes a regular library entry with the ZIP's version and update controls.
 
-Plugin updates are tracked individually so a failure is attributed to the correct plugin. Generic network, filesystem and PHP failures remain update errors; they do not by themselves create premium entries. Activity keeps the original failure and identifies plugins added to the waiting list. Waiting entries are excluded from subsequent regular updates until filled or deleted, and an uploaded package is never replaced by a waiting entry.
+Plugin updates are tracked individually so a failure is attributed to the correct plugin. An HTTP 403 alone, including from an external host, is not classified as premium. Generic network, filesystem and PHP failures remain update errors; they do not by themselves create premium entries. Activity keeps the original failure and identifies plugins added to the waiting list. Waiting entries are excluded from subsequent regular updates until filled or deleted, and an uploaded package is never replaced by a waiting entry.
 
 Upload an individual installable plugin ZIP rather than a vendor download bundle. ZIPs are checked for unsafe paths, links, duplicate entries, encryption, and integrity. Resource limits are 256 MiB per ZIP, 1 GiB of expanded contents, and 100,000 entries. Licensed packages belong in the private library, not in this public repository.
 
@@ -60,13 +64,15 @@ WordPress must use the standard content, plugin, and theme directories. `wp-conf
 3. Open **Mass WP Update**, then click **Refresh sites**.
 4. Add premium ZIPs and choose sites and actions in the two tabs.
 
-Account and domain discovery uses Webuzo's existing CLI. Each WordPress process runs with that hosting account's Unix UID and the domain's native Webuzo PHP runtime. Suspended accounts are skipped. Account ownership or unsupported WordPress layouts produce an error instead of falling back to root. WordPress commands, database exports, and file backups never execute as root.
+Account and domain discovery uses Webuzo's existing CLI and searches actual domain document roots. Before each selected site, current ownership, account/domain status, document root and PHP runtime are checked again. Each WordPress process runs with that hosting account's Unix UID and the domain's native Webuzo PHP runtime. Suspended accounts are skipped. Account ownership or unsupported WordPress layouts produce an error instead of falling back to root. WordPress commands, database exports, and file backups never execute as root.
 
 System paths must be owned by UID 0 and must not be writable by other users. Group-writable paths are accepted only for GID 0 when all explicit and primary-group members have UID 0. MySQL/MariaDB client discovery runs only for database exports, so it does not block site discovery or unrelated actions. Rejected paths report the exact component, ownership, permissions, and reason.
 
 The plugin creates its own private data directory, a separate working directory for account processes, and a native-panel request directory under `/run`. A systemd tmpfiles entry recreates that request directory after reboot. No WordPress companion plugin, scheduled update, daemon, sudoers entry, or change to Webuzo core files is required. Deactivation stops new jobs and preserves the library and backups; wait for a running job to finish before deactivating.
 
-Commands have timeouts, captured output is limited to 4 MiB, and backup output reserves 256 MiB of available filesystem space. A command failure is recorded and stops the remaining actions for that site. Updates already completed on that site remain applied.
+Background site updates and backups have no addon-imposed time limit or captured-output cutoff. Each job runs from an immutable copy of its starting code, so uploading a new addon ZIP does not replace its worker or helpers. Cleanup failures appear as warnings without cancelling completed actions. Backup output reserves 256 MiB of available filesystem space. A command failure is recorded and stops the remaining actions for that site. Updates already completed on that site remain applied.
+
+Database backups use WP-CLI as the hosting account with the selected native PHP and MySQL/MariaDB client. Local socket connections retain PHP's socket; external database hosts retain their configured host/port. The process functions required by the export are enabled only for that CLI invocation; PHP/FPM configuration files are unchanged. Webuzo's account-level database backup is separate from this per-site SQL export.
 
 ## Development
 
@@ -79,6 +85,8 @@ python3 tools/build.py
 ```
 
 The builder includes only the plugin's source, license, and documentation. Tests use synthetic ZIPs; premium packages, credentials, backups, and deployment data are excluded.
+
+Verification results: [Testing](docs/TESTING.md).
 
 Author: [Byron Iniotakis](https://www.iniotakis.com). Licensed under GPL-3.0-or-later. See [UPSTREAM](UPSTREAM) for attribution.
 

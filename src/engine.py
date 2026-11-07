@@ -11,8 +11,9 @@ import jobs
 import state
 import transport
 import account_backups
+import diagnostics
 
-FIELDS = {'status': set(), 'job_status': set(), 'scan': set(), 'update': {'sites', 'options', 'premium','keep_backups'},
+FIELDS = {'save_settings': {'options','keep_backups'},'status': set(), 'job_status': set(), 'scan': set(), 'update': {'sites', 'options', 'premium','keep_backups'},
           'history': {'before'}, 'job_details': {'job'},
           'cancel': {'job'}, 'upload_begin': {'size', 'replace'},
           'upload_chunk': {'upload', 'part', 'offset'}, 'upload_finish': {'upload'}, 'upload_abort': {'upload'},
@@ -21,8 +22,16 @@ FIELDS = {'status': set(), 'job_status': set(), 'scan': set(), 'update': {'sites
 
 def decorate_job(job):
     if job:
+        # Older pinned workers keep running after code upgrades. Recover their
+        # position from the immutable selected sites and recorded results.
+        if job.get('kind') == 'update' and 'site_total' not in job:
+            request = state.read(jobs.directory(job['id']) / 'request.json', {})
+            total = len(request.get('sites', []))
+            position = len(job.get('results', [])) + (1 if job.get('state') == 'running' else 0)
+            job.update(site_total=total, site_index=min(position, total))
         retired=state.read(state.ROOT/'retired-backups.json',{})
         for result in job.get('results',[]):
+            diagnostics.decorate(result)
             if result.get('backup_storage',{}).get('location') in retired:result['backup_removed']=True
     return job
 
@@ -38,6 +47,7 @@ def retire(site,removed):
 
 def status():
     inventory = state.read(state.ROOT / 'inventory.json', dict(sites={}, errors=[]))
+    for item in [*inventory['sites'].values(),*inventory.get('errors',[])]:diagnostics.decorate(item)
     packages = list(catalog.entries().values())
     for package in packages:
         package['sites'] = []
@@ -48,12 +58,13 @@ def status():
                     url=site.get('url',''),
                     version=plugin['version'], newer=not package.get('pending') and host.compare(package['version'], plugin['version']) > 0,
                     error=site.get('error', '')))
+                diagnostics.decorate(package['sites'][-1])
     job = decorate_job(jobs.current())
     prerequisites = ''
     try: host.wp_cli()
     except Exception as error: prerequisites = str(error)
     return dict(ok=True, inventory=inventory, packages=packages, job=job, prerequisites=prerequisites,
-                settings=state.read(state.ROOT/'settings.json',dict(keep_backups=1)))
+                settings=jobs.settings())
 
 
 def upload_path(identity):
@@ -70,6 +81,7 @@ def dispatch(request):
         raise ValueError('Unsupported action or parameters')
     if not state.read(state.ROOT / 'active.json', {}).get('active'): raise ValueError('The plugin is not active')
     if action == 'status': return status()
+    if action=='save_settings':return dict(ok=True,settings=jobs.save_settings(request.get('options'),request.get('keep_backups')))
     if action == 'job_status': return dict(ok=True, job=decorate_job(jobs.current()))
     if action == 'job_details': return dict(ok=True, job=decorate_job(state.read(jobs.directory(request.get('job')) / 'status.json')))
     if action == 'history':

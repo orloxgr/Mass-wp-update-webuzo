@@ -7,6 +7,11 @@ import sys
 sys.dont_write_bytecode = True
 sys.pycache_prefix = str(Path(__file__).resolve().parent / '.bytecode')
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import workers
+with workers.state.locked():
+    generation=workers.pin()
+sys.path.insert(0,str(generation))
+del sys.modules['workers']
 import engine
 import state
 import transport

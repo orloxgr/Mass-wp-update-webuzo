@@ -15,7 +15,7 @@
         <label><input type="checkbox" data-option="core" checked> Update WordPress core</label>
         <label><input type="checkbox" data-option="plugins" checked> Update plugins</label>
         <label><input type="checkbox" data-option="premium" checked> Update premium plugins</label>
-        <label><input type="checkbox" data-option="themes"> Update themes</label>
+        <label><input type="checkbox" data-option="themes" checked> Update themes</label>
       </fieldset>
       <fieldset><legend>Backups</legend>
         <label><input type="checkbox" data-option="backup_plugins" checked> Backup plugins</label>
@@ -28,15 +28,14 @@
         <p class="mwu-help">Older backup sets are removed only after the new set finishes successfully.</p>
       </fieldset>
     </div>
-    <div class="mwu-toolbar"><button type="button" id="mwu-scan">Refresh sites</button><span id="mwu-site-count"></span></div>
+    <div class="mwu-toolbar"><button type="button" id="mwu-scan">Refresh sites</button><button type="button" class="mwu-primary" id="mwu-update">Update selected sites</button><span id="mwu-selection"></span><span id="mwu-site-count"></span></div>
     <section class="mwu-job" id="mwu-job" hidden aria-live="polite">
-      <h3>Activity</h3><p id="mwu-job-status"></p>
+      <h3>Activity</h3><p id="mwu-site-progress" hidden></p><p id="mwu-job-status"></p>
       <button type="button" id="mwu-stop" hidden>Stop after current site</button>
       <div id="mwu-results"></div>
     </section>
     <div id="mwu-discovery-errors"></div>
     <div class="mwu-scroll"><table><thead><tr><th><input type="checkbox" id="mwu-select-all" aria-label="Select all sites"></th><th>Site</th><th>Account</th><th>WordPress</th><th>PHP</th><th>Status</th><th>Backups</th></tr></thead><tbody id="mwu-sites"></tbody></table></div>
-    <div class="mwu-toolbar"><button type="button" class="mwu-primary" id="mwu-update">Update selected sites</button><span id="mwu-selection"></span></div>
     <section class="mwu-job">
       <h3>Previous updates &amp; backups</h3>
       <div class="mwu-toolbar"><select id="mwu-history" aria-label="Previous update job"></select><button type="button" id="mwu-view-history">View results</button><button type="button" id="mwu-older" hidden>Load older jobs</button></div>

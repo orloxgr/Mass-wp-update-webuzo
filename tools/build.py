@@ -14,7 +14,7 @@ def build():
     output = ROOT / 'dist'; output.mkdir(exist_ok=True)
     target = output / ('mass-wp-update-webuzo-' + version + '.zip')
     paths = [ROOT / name for name in ('mass-wp-update-webuzo.php', 'info.json', 'LICENSE', 'README.md', 'UPSTREAM')]
-    for folder in ('src', 'panel'):
+    for folder in ('src', 'panel', 'docs'):
         paths += [path for path in (ROOT / folder).rglob('*') if path.is_file() and
                   '__pycache__' not in path.parts and path.suffix not in ('.pyc', '.zip', '.phar')]
     epoch = int(os.environ.get('SOURCE_DATE_EPOCH', max(path.stat().st_mtime for path in paths)))

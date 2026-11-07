@@ -156,7 +156,8 @@ class BackendTests(unittest.TestCase):
                         'License validated successfully. Download failed: timeout',
                         'Download failed: https://vendor.test/premium-license-expired.zip', 'HTTP 403 Forbidden'):
             with self.subTest(message=message):self.assertIsNone(plugin_updates.detection(message))
-        self.assertEqual(plugin_updates.detection('HTTP 403 Forbidden',external=True),'download_authorization')
+        self.assertIsNone(plugin_updates.detection('HTTP 403 Forbidden',external=True))
+        self.assertEqual(plugin_updates.detection('Download failed: Unauthorized',external=True),'download_authorization')
         self.assertEqual(plugin_updates.detection('Update package not available.',external=True,empty_package=True),'package_unavailable')
         self.assertIsNone(plugin_updates.detection('Update package not available.',external=False,empty_package=True))
         self.assertIsNone(plugin_updates.detection('Permission denied',external=True,empty_package=True))
@@ -321,7 +322,7 @@ class BackendTests(unittest.TestCase):
         for connection, expected in (({'host':'localhost','socket':'/run/database/mysql.sock'},True),
                                      ({'host':'database.example.test:3307','socket':'/run/database/mysql.sock'},False)):
             with patch.object(host, 'account_task'), patch.object(host, 'wp_cli', return_value='/usr/local/bin/wp'), \
-                 patch.object(host, 'run_as', side_effect=[json.dumps(connection),'']) as command:
+                 patch.object(host, 'run_as', side_effect=[json.dumps(connection),json.dumps('exec,system,proc_open'),'']) as command:
                 host.wp(site,['db','export','-','--quiet'],self.base)
                 arguments = command.call_args.args[1]
                 self.assertEqual('--socket=/run/database/mysql.sock' in arguments,expected)
@@ -451,7 +452,7 @@ class BackendTests(unittest.TestCase):
         request=dict(options={key:key in ('plugins','premium') for key in jobs.OPTIONS},packages={})
         def regular(site,inventory,packages,scratch,progress,result):
             result['skipped'].append('Regular: skipped by the WordPress updater')
-        with patch.object(host,'work',return_value=self.base), patch.object(host,'cleanup'), \
+        with patch.object(host,'refresh_site'), patch.object(host,'work',return_value=self.base), patch.object(host,'cleanup'), \
              patch.object(host,'inventory',return_value=dict(core='6.8')), patch.object(jobs,'backups'), \
              patch.object(plugin_updates,'update',side_effect=regular), \
              patch.object(jobs,'premium_plan',return_value=([],['Premium: waiting for premium ZIP'])):
@@ -462,7 +463,7 @@ class BackendTests(unittest.TestCase):
     def test_failed_backup_prevents_all_updates(self):
         site = dict(id='a'*32, domain='example.test', owner='example', core='6.8')
         request = dict(options={key:True for key in jobs.OPTIONS}, packages={})
-        with patch.object(host, 'work', return_value=self.base), patch.object(host, 'cleanup'), \
+        with patch.object(host,'refresh_site'), patch.object(host, 'work', return_value=self.base), patch.object(host, 'cleanup'), \
              patch.object(host, 'inventory', return_value=dict(core='6.8')), patch.object(jobs, 'backups', side_effect=RuntimeError('Backup failed')), \
              patch.object(host, 'wp') as wp:
             result = jobs.update_site(site, request, self.base, lambda message:None)
@@ -486,13 +487,13 @@ class BackendTests(unittest.TestCase):
             self.assertEqual(result.strip().splitlines(), [str(account.pw_uid),'denied'])
         finally: host.cleanup(scratch)
 
-    def test_command_output_limit_and_timeout(self):
+    def test_full_command_output_and_explicit_diagnostic_timeout(self):
         account = pwd.getpwnam('nobody')
         identity = dict(owner=account.pw_name,uid=account.pw_uid,gid=account.pw_gid,home=account.pw_dir)
         os.chmod(self.base, 0o711); scratch = host.work(identity)
         try:
-            with self.assertRaisesRegex(RuntimeError, '4 MiB'):
-                host.run_as(identity, ['/usr/bin/python3','-I','-c','print("x"*5000000)'], scratch)
+            value=host.run_as(identity, ['/usr/bin/python3','-I','-c','print("x"*5000000)'], scratch)
+            self.assertEqual(len(value),5000001)
             with self.assertRaisesRegex(RuntimeError, 'timed out'):
                 host.run_as(identity, ['/usr/bin/python3','-I','-c','import time;time.sleep(10)'], scratch, timeout=.1)
         finally: host.cleanup(scratch)

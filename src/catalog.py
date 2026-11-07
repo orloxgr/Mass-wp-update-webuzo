@@ -13,13 +13,15 @@ import state
 MAX_ZIP = 256 * 1024 * 1024
 MAX_EXPANDED = 1024 * 1024 * 1024
 MAX_FILES = 100000
-SLUG = re.compile(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\Z')
 VERSION = re.compile(r'[0-9A-Za-z][0-9A-Za-z._+\-]{0,63}\Z')
 
 
 def component(value):
-    if not isinstance(value, str) or not SLUG.fullmatch(value) or value in ('.', '..'):
-        raise ValueError('Invalid plugin identity')
+    # WordPress accepts basenames such as _plugin.php, spaces and Unicode.
+    # Validate a path component, rather than imposing a download-slug alphabet.
+    if (not isinstance(value, str) or not value or value in ('.', '..') or
+            any(c in '/\\' or ord(c) < 32 or ord(c) == 127 for c in value)):
+        raise ValueError('Invalid plugin identity: unsafe path component ' + repr(value))
     return value
 
 

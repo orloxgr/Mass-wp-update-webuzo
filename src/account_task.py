@@ -30,13 +30,21 @@ def main():
     if os.geteuid() == 0: raise ValueError('Refusing account work as root')
     if operation == 'discover':
         paths = []
-        for folder, dirs, files in os.walk(home, followlinks=False):
-            dirs[:] = [d for d in dirs if d not in ('wp-content', 'wp-admin', 'wp-includes', 'node_modules', 'vendor', '.git', '.cache', '.masswpupdate')
-                       and not (Path(folder) / d).is_symlink()]
-            if 'wp-load.php' in files:
-                try: check(home, folder)
-                except (OSError, ValueError): continue
-                paths.append(folder)
+        roots = json.loads(sys.argv[3])
+        if not isinstance(roots, list): raise ValueError('Expected native document roots')
+        for root in roots:
+            target = Path(root)
+            if not target.is_absolute() or '..' in target.parts or not target.is_relative_to(Path(home)):
+                raise ValueError('A native document root leaves its hosting account')
+            if not target.exists(): continue
+            if target != target.resolve(): raise ValueError('A document root contains a symbolic link')
+            for folder, dirs, files in os.walk(target, followlinks=False):
+                dirs[:] = [d for d in dirs if d not in ('wp-content', 'wp-admin', 'wp-includes', 'node_modules', 'vendor', '.git', '.cache', '.masswpupdate')
+                           and not (Path(folder) / d).is_symlink()]
+                if 'wp-load.php' in files:
+                    try: check(home, folder)
+                    except (OSError, ValueError): continue
+                    if folder not in paths: paths.append(folder)
         print(json.dumps(paths))
     elif operation == 'check':
         check(home, sys.argv[3])

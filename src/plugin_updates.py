@@ -1,5 +1,6 @@
 """Attribute each failed update to its plugin before considering a manual ZIP."""
 import json
+import base64
 import re
 
 import catalog
@@ -14,7 +15,7 @@ def detection(error,external=False,empty_package=False):
                      r'|\b(?:expired|invalid|inactive|missing|activate|renew|require[sd]?)\b[^\n.!?]{0,50}'
                      r'(?:licen[cs]e(?:\s+key)?|subscription)')
     if re.search(license_failure,text):return 'license_required'
-    if external and re.search(r'\b(?:unauthorized|unauthorised|forbidden|401|403)\b',text):return 'download_authorization'
+    if external and re.search(r'\b(?:unauthorized|unauthorised|401)\b',text):return 'download_authorization'
     if external and empty_package and re.search(r'\b(?:update package not available|no package available|package is not available)\b',text):
         return 'package_unavailable'
     return None
@@ -54,12 +55,16 @@ def update(site,inventory,packages,scratch,progress,result):
         try:
             # JSON mode suppresses the upgrader warnings that explain license
             # failures. One plugin per command keeps those warnings attributable.
-            output=host.wp(site,['plugin','update',slug],scratch)
+            if slug.startswith('-'):
+                encoded=base64.b64encode(slug.encode()).decode()
+                code='WP_CLI::get_runner()->run_command(array("plugin","update",base64_decode("'+encoded+'")),array());'
+                output=host.wp(site,['eval',code],scratch)
+            else:output=host.wp(site,['plugin','update',slug],scratch)
             if re.search(r'(?m)^'+re.escape(slug)+r'\t[^\n]*\tSkipped\s*$',output):
                 result.setdefault('skipped',[]).append(plugin['name']+': skipped by the WordPress updater')
             else:result['actions'].append('Plugin: '+plugin['name'])
         except RuntimeError as error:
-            detail=str(error)+'\n'+getattr(error,'stdout','')
+            detail=str(error)
             reason=detection(detail)
             if not reason:
                 try:reason=detection(detail,**update_context(site,plugin,scratch))
@@ -72,5 +77,5 @@ def update(site,inventory,packages,scratch,progress,result):
                     failures.append(plugin['name']+': Could not add waiting library entry: '+str(pending_error))
             # Never persist signed download links or license values from URLs.
             detail=re.sub(r'https?://\S+','[download URL omitted]',detail).strip()
-            failures.append(plugin['name']+': '+detail[-3000:])
+            failures.append(plugin['name']+': '+detail)
     if failures:raise RuntimeError('\n'.join(failures))

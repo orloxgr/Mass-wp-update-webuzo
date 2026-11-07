@@ -1,3 +1,6 @@
 Original maintenance workflow: https://github.com/orloxgr/mass-wp-update (MIT)
 Native panel request transport adapted from https://github.com/orloxgr/webuzo-de-noise (GPL-3.0-or-later).
 This integration is distributed under GPL-3.0-or-later.
+Shared workflow improvements adapted from Mass-wp-update-hestia v0.1.4:
+https://github.com/orloxgr/Mass-wp-update-hestia/tree/v0.1.4
+Commit b42e7bb604dcec70b795db2be14f1606f55bd8a9, GPL-3.0-or-later.

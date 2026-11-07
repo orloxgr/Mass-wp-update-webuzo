@@ -5,3 +5,5 @@
 .mwu .mwu-primary:hover,.mwu .mwu-primary:focus-visible{background:#35418d;color:#fff;border-color:#35418d}
 .mwu .mwu-waiting{color:#784500;font-weight:600}
 .mwu .mwu-site-link{color:#2f4597;text-decoration:underline;text-underline-offset:2px}
+
+.mwu-error-details pre{white-space:pre-wrap;overflow-wrap:anywhere;max-width:100%}.mwu-error-details summary{cursor:pointer}.mwu-error-info{overflow-wrap:anywhere}#mwu-site-progress{font-weight:600}

@@ -14,8 +14,25 @@ import catalog
 import host
 import state
 import plugin_updates
+import workers
 
 OPTIONS = ('core', 'plugins', 'premium', 'themes', 'backup_plugins', 'backup_themes', 'backup_database')
+
+
+
+def settings():
+    saved = state.read(state.ROOT / 'settings.json', {})
+    return dict(keep_backups=saved.get('keep_backups', 1),
+                options={key:saved.get('options', {}).get(key, True) for key in OPTIONS})
+
+def save_settings(options, keep_backups):
+    if not isinstance(options, dict) or set(options) != set(OPTIONS) or any(type(value) is not bool for value in options.values()):
+        raise ValueError('Invalid update or backup options')
+    if type(keep_backups) is not int or not 1 <= keep_backups <= 10:
+        raise ValueError('Choose 1 to 10 backups to keep')
+    saved = dict(options=options, keep_backups=keep_backups)
+    state.save(state.ROOT / 'settings.json', saved)
+    return saved
 
 
 def directory(identity):
@@ -34,7 +51,10 @@ def current():
         if pid:
             try:
                 command = (Path('/proc') / str(pid) / 'cmdline').read_bytes().split(b'\0')
-                if str(Path(__file__).resolve()).encode() not in command or identity.encode() not in command:
+                script = job.get('worker_script')
+                scripts = [script] if script else [str(Path(__file__).resolve()),
+                    '/usr/local/webuzo/plugins/mass-wp-update-webuzo/src/jobs.py']
+                if not any(value.encode() in command for value in scripts) or identity.encode() not in command:
                     raise ProcessLookupError()
             except (FileNotFoundError, ProcessLookupError):
                 job.update(state='failed', message='Worker stopped before completing. Review the recorded site results before retrying.')
@@ -70,15 +90,19 @@ def start(kind, ids=None, options=None, premium=None, keep_backups=None):
     state.mkdir(path)
     state.save(path / 'request.json', request)
     job = dict(id=identity, kind=kind, state='queued', message='Queued', created=time.time(), results=[])
+    if kind=='update':job.update(site_index=0,site_total=len(request['sites']))
     state.save(path / 'status.json', job)
-    argv = ['/usr/bin/python3', '-I', '-B', str(Path(__file__).resolve()), '--worker', identity]
+    job['worker_script']=str(workers.pin()/'jobs.py')
+    argv = ['/usr/bin/python3', '-I', '-B', job['worker_script'], '--worker', identity]
     actions = [(os.POSIX_SPAWN_OPEN, fd, os.devnull, flags, 0o600)
                for fd, flags in ((0, os.O_RDONLY), (1, os.O_WRONLY), (2, os.O_WRONLY))]
     pid = os.posix_spawn(argv[0], argv, host.ENV, file_actions=actions, setsid=True)
     job['pid'] = pid
     state.save(path / 'status.json', job)
     state.save(state.ROOT / 'latest.json', {'id': identity})
-    if kind=='update':state.save(state.ROOT/'settings.json',dict(keep_backups=keep_backups))
+    if kind=='update' and premium is None:
+        saved=settings();saved['keep_backups']=keep_backups
+        state.save(state.ROOT/'settings.json',saved)
     return job
 
 
@@ -144,10 +168,12 @@ def premium_plan(site, inventory, packages):
 
 
 def update_site(site, request, path, progress):
-    scratch = host.work(site)
+    scratch = None
     result = dict(site=site['id'], domain=site['domain'], owner=site['owner'], state='running', actions=[], backups=[], skipped=[])
     try:
+        host.refresh_site(site)
         if site.get('error'): raise ValueError('Refresh sites after resolving this site\'s inventory error')
+        scratch=host.work(site)
         before = host.inventory(site, scratch)
         result['before'] = before['core']
         backups(site, request, path, scratch, progress, result)
@@ -189,7 +215,9 @@ def update_site(site, request, path, progress):
     except Exception as error:
         result.update(state='failed', error=str(error))
     finally:
-        host.cleanup(scratch)
+        if scratch is not None:
+            try:host.cleanup(scratch)
+            except Exception as error:result.setdefault('warnings',[]).append('Temporary working files could not be removed: '+str(error))
     return result
 
 
@@ -210,9 +238,12 @@ def worker(identity):
             job['results'] = result['errors']
         else:
             inventory = state.read(state.ROOT / 'inventory.json', {'sites': {}})
-            for site in request['sites']:
+            job['site_total']=len(request['sites'])
+            for index,site in enumerate(request['sites'],1):
                 if (path / 'cancel.json').exists():
                     job['state'] = 'cancelled'; break
+                job['site_index']=index
+                progress('Processing '+site['domain'])
                 result = update_site(site, request, path, progress)
                 inventory['sites'][site['id']] = site
                 state.save(state.ROOT / 'inventory.json', inventory)

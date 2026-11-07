@@ -13,6 +13,7 @@ import signal
 import stat
 import subprocess
 import time
+import php_cli
 
 import state
 
@@ -26,7 +27,7 @@ class SiteCommandError(RuntimeError):
     def __init__(self,stdout,stderr):
         self.stdout=stdout.decode('utf-8',errors='replace')
         self.stderr=stderr.decode('utf-8',errors='replace')
-        super().__init__('Site command failed: '+(self.stderr or self.stdout or 'Site command failed')[-3000:])
+        super().__init__('Site command failed: '+'\n'.join(p for p in (self.stderr,self.stdout) if p))
 
 
 def native(kind):
@@ -119,7 +120,7 @@ def account_path():
     return ':'.join(directories + ENV['PATH'].split(':'))
 
 
-def run_as(account, arguments, cwd, timeout=300, output=None, database=False):
+def run_as(account, arguments, cwd, timeout=None, output=None, database=False, input_source=None):
     unix = pwd.getpwnam(account['owner'])
     if (unix.pw_uid == 0 or unix.pw_name == 'webuzo' or unix.pw_uid != account['uid'] or
             unix.pw_gid != account['gid'] or unix.pw_dir != account['home']):
@@ -136,27 +137,25 @@ def run_as(account, arguments, cwd, timeout=300, output=None, database=False):
         if cap <= 0: raise RuntimeError('Insufficient free space for a backup')
     def limits():
         if cap is not None: resource.setrlimit(resource.RLIMIT_FSIZE, (cap, cap))
-    with subprocess.Popen([str(a) for a in arguments], cwd=cwd, env=env, stdin=subprocess.DEVNULL,
+    with subprocess.Popen([str(a) for a in arguments], cwd=cwd, env=env, stdin=input_source if input_source is not None else subprocess.DEVNULL,
             stdout=output if output is not None else subprocess.PIPE, stderr=subprocess.PIPE,
             user=unix.pw_uid, group=unix.pw_gid, extra_groups=[], umask=0o077,
             start_new_session=True, preexec_fn=limits) as child:
         buffers = {'stdout': bytearray(), 'stderr': bytearray()}
-        deadline = time.monotonic() + timeout
+        deadline = time.monotonic() + timeout if timeout is not None else None
         try:
             with selectors.DefaultSelector() as selector:
                 if child.stdout: selector.register(child.stdout, selectors.EVENT_READ, 'stdout')
                 selector.register(child.stderr, selectors.EVENT_READ, 'stderr')
                 while selector.get_map():
-                    remaining = deadline - time.monotonic()
-                    if remaining <= 0: raise RuntimeError('Site command timed out; inspect the site before retrying')
-                    for key, unused in selector.select(min(remaining, 1)):
+                    remaining = deadline - time.monotonic() if deadline is not None else None
+                    if remaining is not None and remaining <= 0: raise RuntimeError('Site command timed out; inspect the site before retrying')
+                    for key, unused in selector.select(min(remaining, 1) if remaining is not None else None):
                         block = os.read(key.fileobj.fileno(), 65536)
                         if not block:
                             selector.unregister(key.fileobj); continue
                         buffers[key.data].extend(block)
-                        if sum(len(b) for b in buffers.values()) > 4 * 1024 * 1024:
-                            raise RuntimeError('Site command output exceeded 4 MiB; inspect the site before retrying')
-                child.wait(timeout=max(0.01, deadline - time.monotonic()))
+                child.wait(timeout=max(0.01, deadline - time.monotonic()) if deadline is not None else None)
         except Exception:
             try: os.killpg(child.pid, signal.SIGKILL)
             except ProcessLookupError: pass
@@ -174,15 +173,18 @@ def account_task(account, operation, cwd, path=None, output=None):
     return run_as(account, args, cwd, output=output)
 
 
-def wp(site, args, cwd, timeout=600, output=None):
+def wp(site, args, cwd, timeout=None, output=None):
     account_task(site, 'check', cwd, site['path'])
+    flags = []
     if args[:2] == ['db', 'export']:
         # WP-CLI intentionally skips client option files. Match PHP's local
         # socket when DB_HOST is localhost; preserve explicit remote/socket hosts.
         socket=database_socket(site,cwd)
         if socket:args=[*args,'--socket='+socket]
+        disabled = json.loads(run_as(site, [site['php_bin'], '-r', php_cli.DISABLED_FUNCTIONS], cwd))
+        flags = php_cli.database_flags(disabled)
     # This process is already the account UID before PHP or wp-config.php loads.
-    return run_as(site, [site['php_bin'], wp_cli(), '--path=' + site['path'], '--skip-plugins',
+    return run_as(site, [site['php_bin'], *flags, wp_cli(), '--path=' + site['path'], '--skip-plugins',
         '--skip-themes', '--skip-packages', '--no-color', *args], cwd, timeout, output, database=args[:2] == ['db', 'export'])
 
 
@@ -201,7 +203,7 @@ def backup_task(site,operation,scratch,request,output=None):
     database=operation=='archive' and request.get('kind')=='database'
     if database:payload.update(php=site['php_bin'],wp=wp_cli(),socket=database_socket(site,scratch))
     raw=run_as(site,['/usr/bin/python3','-I','-B',SOURCE/'account_backups.py',operation,site['home'],json.dumps(payload)],
-               scratch,timeout=900,output=output,database=database)
+               scratch,output=output,database=database)
     return json.loads(raw) if output is None else None
 
 
@@ -262,15 +264,19 @@ def discover(progress):
     for account in owners.values():
         scratch = work(account)
         try:
-            paths = json.loads(account_task(account, 'discover', scratch))
+            roots=sorted({d['path'] for d in domains if d['user']==account['owner'] and not d.get('suspended')})
+            paths = json.loads(account_task(account, 'discover', scratch,json.dumps(roots)))
             for path in paths:
                 site = {**account, 'path': path, 'id': hashlib.sha256((account['owner'] + '\0' + path).encode()).hexdigest()[:32]}
-                matching = [d for d in domains if d['user'] == account['owner'] and
+                matching = [d for d in domains if d['user'] == account['owner'] and not d.get('suspended') and
                             (path == d['path'] or path.startswith(d['path'].rstrip('/') + '/'))]
                 matching.sort(key=lambda d: -len(d['path']))
                 if not matching: continue
                 domain = matching[0]
-                site.update(domain=domain['domain'])
+                from urllib.parse import quote
+                relative=str(Path(path).relative_to(domain['path']))
+                secure=bool(domain.get('cert')) and domain['cert']!='0'
+                site.update(domain=domain['domain'],document_root=domain['path'],url=('https://' if secure else 'http://')+domain['domain']+'/'+(quote(relative,safe='/')+'/' if relative!='.' else ''))
                 try:
                     site['php_bin'] = runtime(domain.get('php_version') or '')
                     progress('Reading ' + site['domain'])
@@ -280,5 +286,24 @@ def discover(progress):
                 result[site['id']] = site
         except Exception as error:
             errors.append(dict(owner=account['owner'], error=str(error)))
-        finally: cleanup(scratch)
+        finally:
+            try:cleanup(scratch)
+            except Exception as error:errors.append(dict(owner=account['owner'],error='Temporary working files could not be removed: '+str(error)))
     return dict(sites=result, errors=errors)
+
+
+def refresh_site(site):
+    """Recheck current native ownership, suspension, root and runtime per site."""
+    account = accounts().get(site['owner'])
+    if not account or any(site[key] != account[key] for key in ('uid', 'gid', 'home')):
+        raise ValueError('The Webuzo account changed or is suspended; refresh sites')
+    matches = [d for d in native('domains') if d['user'] == site['owner']
+               and d['domain'] == site['domain'] and not d.get('suspended')
+               and (site['path'] == d['path'] or site['path'].startswith(d['path'].rstrip('/') + '/'))]
+    if len(matches) != 1:
+        raise ValueError('The site no longer belongs to its active Webuzo domain; refresh sites')
+    domain = matches[0]
+    if site.get('document_root',domain['path'])!=domain['path']:raise ValueError('The native document root changed; refresh sites')
+    site['document_root']=domain['path']
+    site['php_bin'] = runtime(domain.get('php_version') or '')
+    return site
