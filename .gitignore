@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+.venv/
+dist/
+artifacts/
+premium-zips/
+packages/
+backups/
+*.zip
+*.phar
+*.sql
+*.log
+*.sqlite*
+credentials*
+*.key
+*.pem
