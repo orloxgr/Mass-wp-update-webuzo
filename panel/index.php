@@ -29,14 +29,14 @@
       </fieldset>
     </div>
     <div class="mwu-toolbar"><button type="button" id="mwu-scan">Refresh sites</button><span id="mwu-site-count"></span></div>
-    <div id="mwu-discovery-errors"></div>
-    <div class="mwu-scroll"><table><thead><tr><th><input type="checkbox" id="mwu-select-all" aria-label="Select all sites"></th><th>Site</th><th>Account</th><th>WordPress</th><th>PHP</th><th>Status</th><th>Backups</th></tr></thead><tbody id="mwu-sites"></tbody></table></div>
-    <div class="mwu-toolbar"><button type="button" class="mwu-primary" id="mwu-update">Update selected sites</button><span id="mwu-selection"></span></div>
     <section class="mwu-job" id="mwu-job" hidden aria-live="polite">
       <h3>Activity</h3><p id="mwu-job-status"></p>
       <button type="button" id="mwu-stop" hidden>Stop after current site</button>
       <div id="mwu-results"></div>
     </section>
+    <div id="mwu-discovery-errors"></div>
+    <div class="mwu-scroll"><table><thead><tr><th><input type="checkbox" id="mwu-select-all" aria-label="Select all sites"></th><th>Site</th><th>Account</th><th>WordPress</th><th>PHP</th><th>Status</th><th>Backups</th></tr></thead><tbody id="mwu-sites"></tbody></table></div>
+    <div class="mwu-toolbar"><button type="button" class="mwu-primary" id="mwu-update">Update selected sites</button><span id="mwu-selection"></span></div>
     <section class="mwu-job">
       <h3>Previous updates &amp; backups</h3>
       <div class="mwu-toolbar"><select id="mwu-history" aria-label="Previous update job"></select><button type="button" id="mwu-view-history">View results</button><button type="button" id="mwu-older" hidden>Load older jobs</button></div>
@@ -48,7 +48,7 @@
     <div class="mwu-toolbar"><button type="button" id="mwu-add">+ Add premium plugins</button><input type="file" id="mwu-add-file" accept=".zip,application/zip" multiple hidden><span id="mwu-upload-status" role="status"></span></div>
     <div id="mwu-upload-results" class="mwu-scroll" hidden aria-label="ZIP upload results"></div>
     <p class="mwu-help">ZIPs stay in a private server directory. Replacing a ZIP updates the library; sites change only when you run an update. Maximum ZIP: 256 MiB; expanded contents: 1 GiB.</p>
-    <div class="mwu-scroll"><table><thead><tr><th>Plugin</th><th>Version</th><th>Replace ZIP</th><th>Sites</th></tr></thead><tbody id="mwu-packages"></tbody></table></div>
+    <div class="mwu-scroll"><table><thead><tr><th>Plugin</th><th>Version</th><th>Replace ZIP</th><th>Sites</th><th>Delete</th></tr></thead><tbody id="mwu-packages"></tbody></table></div>
     <p class="mwu-help">Premium updates use the backup choices in the Updates tab and apply only to installed copies with an older version.</p>
   </section>
 </div>

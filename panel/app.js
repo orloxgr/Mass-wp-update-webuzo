@@ -40,9 +40,10 @@
       const row = button.closest('.mwu-package-sites');
       button.disabled = demo || active() || deleting || !row.querySelector('input:checked') || !!(snapshot && snapshot.prerequisites);
     });
-    root.querySelectorAll('[data-upload-button]').forEach(button => { button.disabled = demo || uploading; });
-    byId('add').disabled = demo || uploading;
+    root.querySelectorAll('[data-upload-button]').forEach(button => { button.disabled = demo || uploading || deleting; });
+    byId('add').disabled = demo || uploading || deleting;
     root.querySelectorAll('[data-delete-backups]').forEach(button => { button.disabled = demo || active() || deleting; });
+    root.querySelectorAll('[data-delete-premium]').forEach(button => { button.disabled = demo || uploading || deleting || (active() && job.kind === 'update'); });
   }
   function choices(premiumOnly = false) {
     const result = {};
@@ -100,6 +101,16 @@
     master.indeterminate = selected.size > 0 && selected.size < checks.length;
     updateControls();
   }
+  async function deletePremium(item) {
+    if (uploading || deleting || (active() && job.kind === 'update') || !window.confirm('Delete ' + item.name + ' and its uploaded ZIP versions from the premium library? Installed plugins on your sites will remain unchanged.')) return;
+    deleting = true; updateControls(); byId('error').hidden = true;
+    try {
+      const result = await request({action:'delete_premium',slug:item.slug});
+      message(item.name + ' removed from the premium library.' + (result.warnings.length ? ' Some ZIP files could not be removed: ' + result.warnings.join('; ') : ''));
+      await load();
+    } catch (error) { message(error.message, true); }
+    finally { deleting = false; updateControls(); }
+  }
   function uploadInput(replace) {
     const input = element('input'); input.type = 'file'; input.accept = '.zip,application/zip'; input.hidden = true;
     input.addEventListener('change', async () => {
@@ -119,9 +130,12 @@
       replace.type = 'button'; replace.dataset.uploadButton = '1'; replace.addEventListener('click', () => input.click());
       replaceCell.append(replace, input); row.append(replaceCell);
       const sitesCell = element('td'), view = element('button', 'View sites (' + item.sites.length + ')');
-      view.type = 'button'; view.setAttribute('aria-expanded','false'); sitesCell.append(view); row.append(sitesCell); body.append(row);
+      view.type = 'button'; view.setAttribute('aria-expanded','false'); sitesCell.append(view); row.append(sitesCell);
+      const deleteCell = element('td'), remove = element('button', 'Delete'); remove.type = 'button'; remove.dataset.deletePremium = item.slug;
+      remove.setAttribute('aria-label','Delete ' + item.name + ' from premium library');
+      remove.addEventListener('click', () => deletePremium(item)); deleteCell.append(remove); row.append(deleteCell); body.append(row);
       const detailsRow = element('tr'); detailsRow.hidden = true;
-      const details = element('td', undefined, 'mwu-package-sites'); details.colSpan = 4;
+      const details = element('td', undefined, 'mwu-package-sites'); details.colSpan = 5;
       details.append(element('h4', item.name + ' · Available version ' + item.version));
       if (!item.sites.length) details.append(element('p', 'No installed copies found. Refresh sites after installing this plugin on a site.'));
       const eligible = [];
@@ -145,7 +159,7 @@
       details.append(update); detailsRow.append(details); body.append(detailsRow);
       view.addEventListener('click', () => { detailsRow.hidden = !detailsRow.hidden; view.setAttribute('aria-expanded', String(!detailsRow.hidden)); });
     }
-    if (!snapshot.packages.length) { const row = element('tr'), cell = element('td', 'Your premium library is empty. Add your first plugin ZIP above.'); cell.colSpan = 4; row.append(cell); body.append(row); }
+    if (!snapshot.packages.length) { const row = element('tr'), cell = element('td', 'Your premium library is empty. Add your first plugin ZIP above.'); cell.colSpan = 5; row.append(cell); body.append(row); }
     updateControls();
   }
   async function uploadFile(file, replace, progress) {

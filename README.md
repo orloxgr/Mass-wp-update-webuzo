@@ -39,6 +39,8 @@ Open **Premium plugins** and click **+ Add premium plugins**. Select one or more
 
 Uploading or replacing a ZIP never updates a site automatically. Running jobs keep the exact package versions selected when they started. ZIP filenames do not need to include a version. Additional premium plugins can be added at any time.
 
+**Delete** removes that plugin from the premium library and deletes its uploaded ZIP versions after confirmation. Installed plugins on sites and site backups are kept. Deletion is unavailable while an update job is using the library.
+
 Upload an individual installable plugin ZIP rather than a vendor download bundle. ZIPs are checked for unsafe paths, links, duplicate entries, encryption, and integrity. Resource limits are 256 MiB per ZIP, 1 GiB of expanded contents, and 100,000 entries. Licensed packages belong in the private library, not in this public repository.
 
 ## Installation

@@ -1,7 +1,7 @@
 <?php
 /*
 Plugin Name: Mass WP Update for Webuzo
-Version: 0.2.0
+Version: 0.2.1
 Description: Update WordPress sites and manage a private premium plugin library.
 Author: Byron Iniotakis
 Author URI: https://www.iniotakis.com

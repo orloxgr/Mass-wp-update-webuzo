@@ -73,6 +73,36 @@ def entries():
     return state.read(state.ROOT / 'catalog.json', {})
 
 
+def remove(slug):
+    component(slug)
+    current=entries()
+    if slug not in current:raise ValueError('This plugin is not in the premium library')
+    # Only this plugin's named ZIPs in the root-private package store qualify.
+    # Include older uploaded versions; never recurse into a user-provided path.
+    store=state.ROOT/'packages';state.trusted(store,True)
+    paths=[]
+    for folder in store.iterdir():
+        if not re.fullmatch('[0-9a-f]{64}',folder.name):continue
+        state.trusted(folder,True)
+        for path in folder.iterdir():
+            if not path.name.startswith(slug+'-') or not path.name.endswith('.zip'):continue
+            if not VERSION.fullmatch(path.name[len(slug)+1:-4]):continue
+            state.trusted(path)
+            if path.stat().st_nlink!=1:raise ValueError('Unexpected package hardlink')
+            # A similarly prefixed plugin may contain a valid hyphenated version.
+            # Confirm identity from its non-executable ZIP header before removal.
+            if inspect(path)['slug']==slug:paths.append(path)
+    del current[slug]
+    state.save(state.ROOT/'catalog.json',current)
+    warnings=[]
+    for path in paths:
+        try:
+            path.unlink()
+            if not any(path.parent.iterdir()):path.parent.rmdir()
+        except OSError as error:warnings.append(path.name+': '+str(error))
+    return dict(removed=len(paths)-len(warnings),warnings=warnings)
+
+
 def package(record):
     component(record['slug'])
     if not VERSION.fullmatch(record['version']) or not re.fullmatch('[0-9a-f]{64}', record['sha256']):

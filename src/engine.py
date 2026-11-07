@@ -16,7 +16,7 @@ FIELDS = {'status': set(), 'job_status': set(), 'scan': set(), 'update': {'sites
           'history': {'before'}, 'job_details': {'job'},
           'cancel': {'job'}, 'upload_begin': {'size', 'replace'},
           'upload_chunk': {'upload', 'part', 'offset'}, 'upload_finish': {'upload'}, 'upload_abort': {'upload'},
-          'download_prepare': {'job', 'site', 'name'}, 'delete_backups': {'site'}}
+          'download_prepare': {'job', 'site', 'name'}, 'delete_backups': {'site'}, 'delete_premium': {'slug'}}
 
 
 def decorate_job(job):
@@ -102,6 +102,11 @@ def dispatch(request):
         finally:host.cleanup(scratch)
         retire(identity,result['removed'])
         return dict(ok=True,removed=len(result['removed']),warnings=result['warnings'])
+    if action == 'delete_premium':
+        current=jobs.current()
+        if current and current['kind']=='update' and current['state'] in ('queued','running'):
+            raise ValueError('Wait for the update job to finish before deleting premium packages')
+        return dict(ok=True,**catalog.remove(request.get('slug')))
     if action == 'cancel':
         current = jobs.current()
         if not current or current['id'] != request.get('job') or current['state'] not in ('queued', 'running'):

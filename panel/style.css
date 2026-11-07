@@ -2,3 +2,4 @@
 
 .mwu select{min-width:240px;max-width:100%;border:1px solid #b9c3db;border-radius:5px;padding:10px;background:#fff;color:#283960}.mwu #mwu-packages td:first-child{min-width:220px;max-width:480px}
 .mwu #mwu-keep-backups{min-width:70px;width:70px;flex-shrink:0}.mwu [data-delete-backups]{white-space:nowrap}.mwu label[for=mwu-keep-backups]{flex-wrap:wrap}
+.mwu .mwu-primary:hover,.mwu .mwu-primary:focus-visible{background:#35418d;color:#fff;border-color:#35418d}

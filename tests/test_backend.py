@@ -112,6 +112,37 @@ class BackendTests(unittest.TestCase):
         with self.assertRaises(ValueError): catalog.commit(plugin_zip(self.base / 'second.zip', main='other.php'), first['slug'])
         with self.assertRaises(ValueError): catalog.commit(plugin_zip(self.base / 'third.zip'))
 
+    def test_delete_premium_removes_only_selected_plugin_and_its_versions(self):
+        first=catalog.commit(plugin_zip(self.base/'first.zip','1.0',slug='example'))
+        second=catalog.commit(plugin_zip(self.base/'second.zip','2.0',slug='example'),first['slug'])
+        other=catalog.commit(plugin_zip(self.base/'other.zip','1.0',slug='example-pro'))
+        old_path,new_path,other_path=[catalog.package(record) for record in (first,second,other)]
+        sentinel=state.ROOT/'backups'/'preserved';state.write(sentinel,b'preserve')
+        result=self.api('delete_premium',slug=first['slug'])
+        self.assertEqual(result,dict(ok=True,removed=2,warnings=[]))
+        self.assertFalse(old_path.exists());self.assertFalse(new_path.exists())
+        self.assertEqual(set(catalog.entries()),{'example-pro'})
+        self.assertTrue(other_path.exists());self.assertEqual(sentinel.read_bytes(),b'preserve')
+        for bad in ('../backups','/etc/passwd','missing',None):
+            with self.assertRaises(ValueError):self.api('delete_premium',slug=bad)
+        with self.assertRaises(ValueError):self.api('delete_premium',slug='example-pro',path='/etc')
+
+    def test_delete_premium_refuses_active_update_and_preserves_pinned_zip(self):
+        record=catalog.commit(plugin_zip(self.base/'first.zip'))
+        path=catalog.package(record)
+        for status in ('queued','running'):
+            with patch.object(jobs,'current',return_value=dict(kind='update',state=status)):
+                with self.assertRaisesRegex(ValueError,'update job'):self.api('delete_premium',slug=record['slug'])
+                self.assertTrue(path.exists());self.assertIn(record['slug'],catalog.entries())
+
+    def test_delete_premium_rejects_symlink_package_before_catalog_changes(self):
+        record=catalog.commit(plugin_zip(self.base/'first.zip'))
+        path=catalog.package(record);path.unlink()
+        sentinel=self.base/'sentinel';sentinel.write_text('keep');sentinel.chmod(0o600)
+        path.symlink_to(sentinel)
+        with self.assertRaises(ValueError):self.api('delete_premium',slug=record['slug'])
+        self.assertIn(record['slug'],catalog.entries());self.assertEqual(sentinel.read_text(),'keep')
+
     def test_tampered_stored_package_rejected(self):
         record = catalog.commit(plugin_zip(self.base / 'first.zip'))
         catalog.package(record).write_bytes(b'tampered')
