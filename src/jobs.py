@@ -13,6 +13,7 @@ import time
 import catalog
 import host
 import state
+import plugin_updates
 
 OPTIONS = ('core', 'plugins', 'premium', 'themes', 'backup_plugins', 'backup_themes', 'backup_database')
 
@@ -59,6 +60,7 @@ def start(kind, ids=None, options=None, premium=None, keep_backups=None):
         if premium is not None:
             catalog.component(premium)
             if premium not in packages: raise ValueError('Unknown premium plugin')
+            if packages[premium].get('pending'):raise ValueError('Upload the premium ZIP before updating this plugin')
             if not options['premium'] or any(options[key] for key in ('core', 'plugins', 'themes')):
                 raise ValueError('A premium-plugin action may update only that plugin')
             packages = {premium: packages[premium]}
@@ -127,6 +129,8 @@ def premium_plan(site, inventory, packages):
         plugin = installed.get(record['plugin_file'])
         if not plugin:
             skipped.append(record['name'] + ': not installed'); continue
+        if record.get('pending'):
+            skipped.append(record['name'] + ': waiting for premium ZIP');continue
         if host.compare(record['version'], plugin['version']) <= 0:
             skipped.append(record['name'] + ': installed version is current or newer'); continue
         if record['requires_php'] and host.compare(inventory['php'], record['requires_php']) < 0:
@@ -153,18 +157,18 @@ def update_site(site, request, path, progress):
         if options['core']:
             commands += [('WordPress core', ['core', 'update']),
                          ('WordPress database', ['core', 'update-db'] + (['--network'] if before.get('multisite') else []))]
-        if options['plugins']:
-            args = ['plugin', 'update', '--all']
-            if request['packages']: args += ['--exclude=' + ','.join(request['packages'])]
-            commands.append(('Plugins', args))
-        if options['themes']: commands.append(('Themes', ['theme', 'update', '--all']))
         for title, args in commands:
             progress('Updating ' + title + ' on ' + site['domain'])
             host.wp(site, args, scratch)
             result['actions'].append(title)
+        if options['plugins']:plugin_updates.update(site,before,request['packages'],scratch,progress,result)
+        if options['themes']:
+            progress('Updating Themes on '+site['domain'])
+            host.wp(site,['theme','update','--all'],scratch);result['actions'].append('Themes')
         current_inventory = host.inventory(site, scratch)
         if options['premium']:
-            plan, result['skipped'] = premium_plan(site, current_inventory, request['packages'])
+            plan, premium_skipped = premium_plan(site, current_inventory, request['packages'])
+            result['skipped'].extend(premium_skipped)
             for record in plan:
                 progress('Updating ' + record['name'] + ' on ' + site['domain'])
                 source = catalog.package(record)

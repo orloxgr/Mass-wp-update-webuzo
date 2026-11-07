@@ -73,6 +73,34 @@ def entries():
     return state.read(state.ROOT / 'catalog.json', {})
 
 
+def plugin_slug(file):
+    pieces=file.split('/') if isinstance(file,str) else []
+    if len(pieces) not in (1,2):raise ValueError('Invalid installed plugin file')
+    for piece in pieces:component(piece)
+    return pieces[0] if len(pieces)==2 else component(Path(file).stem)
+
+
+def queue_pending(plugin,site,reason,target_version=''):
+    slug=plugin_slug(plugin['file'])
+    if reason not in ('license_required','download_authorization','package_unavailable'):raise ValueError('Invalid premium detection reason')
+    name=plugin['name']
+    if not isinstance(name,str) or not name or len(name)>512:raise ValueError('Invalid plugin name')
+    state.identity(site['id'])
+    if not isinstance(target_version,str) or not VERSION.fullmatch(target_version):target_version=''
+    # The worker shares the catalog with authenticated uploads. Always merge the
+    # latest state under the same lock so a finished upload cannot be overwritten.
+    with state.locked():
+        current=entries();record=current.get(slug)
+        if record and (not record.get('pending') or record['plugin_file']!=plugin['file']):return False
+        if not record:
+            record=dict(slug=slug,plugin_file=plugin['file'],name=name,version='',author='',pending=True,
+                        requires_php='',requires_wp='',requires_plugins='',detected_at=time.time(),source_sites={})
+        record['reason']=reason
+        record['source_sites'][site['id']]=dict(installed_version=plugin['version'],requested_version=target_version)
+        current[slug]=record;state.save(state.ROOT/'catalog.json',current)
+    return True
+
+
 def remove(slug):
     component(slug)
     current=entries()
@@ -125,7 +153,9 @@ def commit(source, expected=None):
         if expected not in current or current[expected]['plugin_file'] != metadata['plugin_file']:
             raise ValueError('Replacement ZIP must contain the same plugin directory and main file')
     elif metadata['slug'] in current:
-        raise ValueError('This plugin is already in the library; use Replace ZIP')
+        existing=current[metadata['slug']]
+        if not existing.get('pending'):raise ValueError('This plugin is already in the library; use Replace ZIP')
+        if existing['plugin_file']!=metadata['plugin_file']:raise ValueError('ZIP must contain the same plugin directory and main file as the waiting entry')
     destination = state.ROOT / 'packages' / metadata['sha256']
     state.mkdir(destination)
     target = destination / (metadata['slug'] + '-' + metadata['version'] + '.zip')

@@ -21,6 +21,7 @@ import lifecycle
 import state
 import transport
 import account_backups
+import plugin_updates
 
 
 def plugin_zip(path, version='2.0.0', slug='example-premium', main='plugin.php', extra=None, headers=''):
@@ -148,6 +149,103 @@ class BackendTests(unittest.TestCase):
         catalog.package(record).write_bytes(b'tampered')
         with self.assertRaises(ValueError): catalog.package(record)
 
+    def test_premium_failure_detection_requires_relevant_evidence(self):
+        for message in ('Your license key has expired.','Please activate your license.','An invalid subscription prevents updates.'):
+            with self.subTest(message=message):self.assertEqual(plugin_updates.detection(message),'license_required')
+        for message in ('Permission denied','Connection timed out','Disk quota exceeded','PHP fatal error',
+                        'License validated successfully. Download failed: timeout',
+                        'Download failed: https://vendor.test/premium-license-expired.zip', 'HTTP 403 Forbidden'):
+            with self.subTest(message=message):self.assertIsNone(plugin_updates.detection(message))
+        self.assertEqual(plugin_updates.detection('HTTP 403 Forbidden',external=True),'download_authorization')
+        self.assertEqual(plugin_updates.detection('Update package not available.',external=True,empty_package=True),'package_unavailable')
+        self.assertIsNone(plugin_updates.detection('Update package not available.',external=False,empty_package=True))
+        self.assertIsNone(plugin_updates.detection('Permission denied',external=True,empty_package=True))
+
+    def test_pending_premium_deduplicates_sites_and_can_be_deleted_empty(self):
+        plugin=dict(file='example-premium/plugin.php',name='Example Premium',version='1.0')
+        for identity in ('a'*32,'b'*32,'a'*32):
+            self.assertTrue(catalog.queue_pending(plugin,dict(id=identity),'license_required','2.0'))
+        record=catalog.entries()['example-premium']
+        self.assertTrue(record['pending']);self.assertEqual(len(record['source_sites']),2)
+        self.assertNotIn('sha256',record);self.assertEqual(list((state.ROOT/'packages').iterdir()),[])
+        self.assertEqual(self.api('delete_premium',slug='example-premium')['removed'],0)
+        self.assertEqual(catalog.entries(),{})
+
+    def test_waiting_entry_accepts_matching_zip_through_bulk_or_replace(self):
+        plugin=dict(file='example-premium/plugin.php',name='Example Premium',version='1.0')
+        for replace in (None,'example-premium'):
+            catalog.queue_pending(plugin,dict(id='a'*32),'license_required','2.0')
+            with self.assertRaises(ValueError):catalog.commit(plugin_zip(self.base/'wrong.zip',main='other.php'),replace)
+            record=catalog.commit(plugin_zip(self.base/'right.zip'),replace)
+            self.assertEqual(record['version'],'2.0.0');self.assertFalse(record.get('pending'))
+            self.assertTrue(catalog.package(record).exists())
+            self.assertFalse(catalog.queue_pending(plugin,dict(id='b'*32),'license_required','3.0'))
+            self.assertEqual(catalog.entries()['example-premium']['sha256'],record['sha256'])
+            self.api('delete_premium',slug='example-premium')
+
+    def test_waiting_entry_has_sites_but_no_update_action(self):
+        plugin=dict(file='example-premium/plugin.php',name='Example Premium',version='1.0')
+        catalog.queue_pending(plugin,dict(id='a'*32),'license_required','2.0')
+        site=dict(id='a'*32,domain='example.test',owner='example',plugins=[plugin])
+        state.save(state.ROOT/'inventory.json',dict(sites={site['id']:site},errors=[]))
+        with patch.object(host,'compare',side_effect=AssertionError('Pending has no package version')),patch.object(host,'wp_cli',return_value='/usr/bin/wp'):
+            row=self.api('status')['packages'][0]
+        self.assertFalse(row['sites'][0]['newer']);self.assertEqual(row['sites'][0]['version'],'1.0')
+        with self.assertRaisesRegex(ValueError,'Upload the premium ZIP'):
+            jobs.start('update',[site['id']],{key:key=='premium' for key in jobs.OPTIONS},'example-premium')
+        plan,skipped=jobs.premium_plan(site,dict(plugins=[plugin]),catalog.entries())
+        self.assertEqual(plan,[]);self.assertIn('waiting for premium ZIP',skipped[0])
+
+    def test_regular_plugin_updates_attribute_failures_and_continue_other_plugins(self):
+        site=dict(id='a'*32,domain='example.test')
+        plugins=[dict(file=slug+'/plugin.php',name=slug,version='1.0') for slug in ('licensed','ordinary','working')]
+        offers=[dict(name=slug,update_version='2.0') for slug in ('licensed','ordinary','working')]
+        def wp(account,args,scratch):
+            if args[:2]==['plugin','list']:return json.dumps(offers)
+            if args[:2]==['plugin','update']:
+                if args[2]=='licensed':raise RuntimeError('License key expired')
+                if args[2]=='ordinary':raise RuntimeError('Permission denied')
+                return '[]'
+            if args[0]=='eval':return json.dumps(dict(external=False,empty_package=False))
+            raise AssertionError(args)
+        result=dict(actions=[])
+        with patch.object(host,'wp',side_effect=wp) as command:
+            with self.assertRaisesRegex(RuntimeError,'Permission denied'):
+                plugin_updates.update(site,dict(plugins=plugins),{},self.base,lambda message:None,result)
+        self.assertEqual(set(catalog.entries()),{'licensed'})
+        self.assertEqual(result['pending_premium'],['licensed']);self.assertEqual(result['actions'],['Plugin: working'])
+        self.assertEqual(sum(c.args[1][:2]==['plugin','update'] for c in command.call_args_list),3)
+        for call in command.call_args_list:
+            if call.args[1][:2]==['plugin','update']:self.assertNotIn('--format=json',call.args[1])
+
+    def test_plugin_failure_keeps_stdout_reason_and_redacts_signed_urls(self):
+        plugin=dict(file='licensed/plugin.php',name='Licensed',version='1.0')
+        offer=json.dumps([dict(name='licensed',update_version='2.0')])
+        error=host.SiteCommandError(b'Your license key has expired. https://vendor.test/file.zip?license=private-value',b'Error: No plugins updated')
+        with patch.object(host,'wp',side_effect=[offer,error]):
+            with self.assertRaises(RuntimeError) as raised:
+                plugin_updates.update(dict(id='a'*32,domain='example.test'),dict(plugins=[plugin]),{},self.base,lambda message:None,dict(actions=[]))
+        self.assertNotIn('private-value',str(raised.exception));self.assertIn('expired',str(raised.exception))
+        self.assertTrue(catalog.entries()['licensed']['pending'])
+
+    def test_skipped_plugin_is_not_a_premium_failure_or_completed_update(self):
+        plugin=dict(file='example/plugin.php',name='Example',version='2.0')
+        offer=json.dumps([dict(name='example',update_version='1.0')])
+        result=dict(actions=[])
+        with patch.object(host,'wp',side_effect=[offer,'name\told_version\tnew_version\tstatus\nexample\t2.0\t1.0\tSkipped\n']):
+            plugin_updates.update(dict(domain='example.test'),dict(plugins=[plugin]),{},self.base,lambda message:None,result)
+        self.assertFalse(result['actions']);self.assertTrue(result['skipped']);self.assertEqual(catalog.entries(),{})
+
+    def test_regular_plugin_updates_skip_library_and_reject_unknown_identity(self):
+        inventory=dict(plugins=[dict(file=slug+'/plugin.php',name=slug,version='1.0') for slug in ('ready','waiting')])
+        offers=[dict(name=slug,update_version='2.0') for slug in ('ready','waiting')]
+        with patch.object(host,'wp',return_value=json.dumps(offers)) as command:
+            plugin_updates.update(dict(domain='example.test'),inventory,{'ready':{},'waiting':dict(pending=True)},self.base,lambda message:None,dict(actions=[]))
+            self.assertEqual(command.call_count,1)
+        with patch.object(host,'wp',return_value=json.dumps([dict(name='../escape',update_version='2.0')])) as command:
+            with self.assertRaises(ValueError):plugin_updates.update({},inventory,{},self.base,lambda message:None,dict(actions=[]))
+            self.assertEqual(command.call_count,1)
+
     def test_paths_reject_links_and_group_writable_ancestors(self):
         secret = self.base / 'file'; secret.write_text('secret'); os.chmod(secret, 0o600)
         link = self.base / 'link'; link.symlink_to(secret)
@@ -229,9 +327,12 @@ class BackendTests(unittest.TestCase):
                 self.assertEqual('--socket=/run/database/mysql.sock' in arguments,expected)
 
     def test_inventory_cannot_replace_account_identity_or_supply_paths(self):
-        base=dict(core='7.0',php='8.3',plugins=[],themes=[],multisite=False,layout_ok=True)
+        base=dict(core='7.0',php='8.3',url='https://example.test/blog/',plugins=[],themes=[],multisite=False,layout_ok=True)
+        with patch.object(host,'wp',return_value=json.dumps(base)):
+            self.assertEqual(host.inventory({},self.base)['url'],'https://example.test/blog/')
         for value in ({**base,'owner':'root'}, {**base,'layout_ok':False},
-                      {**base,'plugins':[dict(file='../../outside.php',version='1')]}, {**base,'core':[]}):
+                      {**base,'plugins':[dict(file='../../outside.php',version='1')]}, {**base,'core':[]},
+                      {**base,'url':'javascript:alert(1)'}, {**base,'url':'https://name:password@example.test/'}):
             with self.subTest(value=value),patch.object(host,'wp',return_value=json.dumps(value)):
                 with self.assertRaises(ValueError):host.inventory({},self.base)
 
@@ -344,6 +445,19 @@ class BackendTests(unittest.TestCase):
         inventory = dict(core='6.8', php='8.3', plugins=[dict(file=record['plugin_file'], version='1.0')])
         with patch.object(host, 'compare', side_effect=lambda a,b: (a>b)-(a<b)):
             with self.assertRaises(ValueError): jobs.premium_plan({}, inventory, {record['slug']:record})
+
+    def test_regular_and_premium_skips_are_both_retained(self):
+        site=dict(id='a'*32,domain='example.test',owner='example')
+        request=dict(options={key:key in ('plugins','premium') for key in jobs.OPTIONS},packages={})
+        def regular(site,inventory,packages,scratch,progress,result):
+            result['skipped'].append('Regular: skipped by the WordPress updater')
+        with patch.object(host,'work',return_value=self.base), patch.object(host,'cleanup'), \
+             patch.object(host,'inventory',return_value=dict(core='6.8')), patch.object(jobs,'backups'), \
+             patch.object(plugin_updates,'update',side_effect=regular), \
+             patch.object(jobs,'premium_plan',return_value=([],['Premium: waiting for premium ZIP'])):
+            result=jobs.update_site(site,request,self.base,lambda message:None)
+        self.assertEqual(result['state'],'complete')
+        self.assertEqual(result['skipped'],['Regular: skipped by the WordPress updater','Premium: waiting for premium ZIP'])
 
     def test_failed_backup_prevents_all_updates(self):
         site = dict(id='a'*32, domain='example.test', owner='example', core='6.8')

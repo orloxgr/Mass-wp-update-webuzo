@@ -11,6 +11,8 @@ Update WordPress sites from the Webuzo administrator panel and keep your premium
 
 Sites run one at a time. Selected backups finish before that site's updates begin; a failed backup stops updates for that site. Activity shows completed actions, skipped premium updates, errors, and backup downloads. **Previous updates & backups** keeps earlier results and downloads available. **Stop after current site** lets the current site finish before the next one starts.
 
+Site names in the Updates list and premium plugin site lists open the WordPress home page in a new tab.
+
 Core updates include the WordPress database update, across the network for Multisite. Each row represents one WordPress installation; updates to a Multisite installation affect its shared files and network. Regular plugin updates exclude plugins registered in the premium library. Premium updates use your uploaded packages, apply only to matching installed plugins with an older version, and check their declared WordPress, PHP, and plugin dependencies. Plugins are not activated automatically.
 
 Backups are stored under the hosting account's home, outside its Webuzo document roots:
@@ -40,6 +42,10 @@ Open **Premium plugins** and click **+ Add premium plugins**. Select one or more
 Uploading or replacing a ZIP never updates a site automatically. Running jobs keep the exact package versions selected when they started. ZIP filenames do not need to include a version. Additional premium plugins can be added at any time.
 
 **Delete** removes that plugin from the premium library and deletes its uploaded ZIP versions after confirmation. Installed plugins on sites and site backups are kept. Deletion is unavailable while an update job is using the library.
+
+When a regular plugin update fails with a license/subscription requirement, or an external update provider refuses access or supplies no downloadable package, the plugin is added once to the library as **Waiting for premium ZIP**. **View sites** shows installed copies and versions. Use **Upload ZIP**, or include the ZIP in a bulk upload, to fill the waiting entry. The directory and main plugin file must match. The row then becomes a regular library entry with the ZIP's version and update controls.
+
+Plugin updates are tracked individually so a failure is attributed to the correct plugin. Generic network, filesystem and PHP failures remain update errors; they do not by themselves create premium entries. Activity keeps the original failure and identifies plugins added to the waiting list. Waiting entries are excluded from subsequent regular updates until filled or deleted, and an uploaded package is never replaced by a waiting entry.
 
 Upload an individual installable plugin ZIP rather than a vendor download bundle. ZIPs are checked for unsafe paths, links, duplicate entries, encryption, and integrity. Resource limits are 256 MiB per ZIP, 1 GiB of expanded contents, and 100,000 entries. Licensed packages belong in the private library, not in this public repository.
 

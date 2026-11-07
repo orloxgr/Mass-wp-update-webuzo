@@ -15,6 +15,14 @@
     if (className) node.className = className;
     return node;
   }
+  function siteLink(site) {
+    const link = element('a', site.domain, 'mwu-site-link');
+    let url;
+    try { url = new URL(site.url || 'https://' + site.domain); }
+    catch (error) { return element('span', site.domain); }
+    if (!['http:','https:'].includes(url.protocol) || url.username || url.password) return element('span', site.domain);
+    link.href = url.href; link.target = '_blank'; link.rel = 'noopener noreferrer'; return link;
+  }
   function message(text, error = false) {
     const target = byId(error ? 'error' : 'notice');
     target.textContent = text || ''; target.hidden = !text;
@@ -69,7 +77,8 @@
       check.setAttribute('aria-label', 'Select ' + site.domain);
       check.addEventListener('change', () => { if (check.checked) selected.add(site.id); else selected.delete(site.id); syncSelection(); });
       cell.append(check); row.append(cell);
-      const name = element('td'); name.append(element('strong', site.domain), element('div', site.path, 'mwu-path')); row.append(name);
+      const name = element('td'), title = element('strong'); title.append(siteLink(site));
+      name.append(title, element('div', site.path, 'mwu-path')); row.append(name);
       row.append(element('td', site.owner), element('td', site.core || '—'), element('td', site.php || '—'), element('td', site.error || (site.multisite ? 'Ready · Multisite' : 'Ready'), site.error ? 'mwu-failure' : ''));
       const backups = element('td'), remove = element('button', 'Delete backups'); remove.type = 'button'; remove.dataset.deleteBackups = site.id;
       remove.setAttribute('aria-label', 'Delete backups for ' + site.domain);
@@ -121,12 +130,13 @@
   }
   function renderPackages() {
     const body = byId('packages'); body.replaceChildren();
-    for (const item of snapshot.packages) {
+    const packages = [...snapshot.packages].sort((a, b) => Number(!!b.pending) - Number(!!a.pending));
+    for (const item of packages) {
       const row = element('tr'), name = element('td');
       name.append(element('strong', item.name), element('div', item.plugin_file, 'mwu-path'));
       if (item.author) name.append(element('div', item.author, 'mwu-path'));
-      row.append(name, element('td', item.version));
-      const replaceCell = element('td'), input = uploadInput(item.slug), replace = element('button', 'Replace ZIP');
+      row.append(name, element('td', item.pending ? 'Waiting for premium ZIP' : item.version, item.pending ? 'mwu-waiting' : ''));
+      const replaceCell = element('td'), input = uploadInput(item.slug), replace = element('button', item.pending ? 'Upload ZIP' : 'Replace ZIP');
       replace.type = 'button'; replace.dataset.uploadButton = '1'; replace.addEventListener('click', () => input.click());
       replaceCell.append(replace, input); row.append(replaceCell);
       const sitesCell = element('td'), view = element('button', 'View sites (' + item.sites.length + ')');
@@ -136,7 +146,8 @@
       remove.addEventListener('click', () => deletePremium(item)); deleteCell.append(remove); row.append(deleteCell); body.append(row);
       const detailsRow = element('tr'); detailsRow.hidden = true;
       const details = element('td', undefined, 'mwu-package-sites'); details.colSpan = 5;
-      details.append(element('h4', item.name + ' · Available version ' + item.version));
+      details.append(element('h4', item.name + (item.pending ? ' · Waiting for premium ZIP' : ' · Available version ' + item.version)));
+      if (item.pending) details.append(element('p', 'Upload the vendor’s installable ZIP to make this plugin available for updates.'));
       if (!item.sites.length) details.append(element('p', 'No installed copies found. Refresh sites after installing this plugin on a site.'));
       const eligible = [];
       for (const site of item.sites) {
@@ -144,8 +155,10 @@
         check.disabled = !site.newer || !!site.error;
         if (!check.disabled) eligible.push(check);
         check.addEventListener('change', updateControls);
-        label.append(check, element('span', site.domain + ' · ' + site.owner + ' · Installed ' + site.version));
+        const description = element('span'); description.append(siteLink(site), document.createTextNode(' · ' + site.owner + ' · Installed ' + site.version));
+        label.append(check, description);
         if (site.error) label.append(element('span', site.error, 'mwu-failure'));
+        else if (item.pending) label.append(element('span', 'Waiting for premium ZIP', 'mwu-badge'));
         else if (!site.newer) label.append(element('span', 'Current or newer', 'mwu-badge'));
         details.append(label);
       }
@@ -154,9 +167,11 @@
         select.addEventListener('click', () => { eligible.forEach(check => { check.checked = true; }); updateControls(); });
         details.append(select, document.createTextNode(' '));
       }
-      const update = element('button', 'Update selected'); update.type = 'button'; update.className = 'mwu-primary'; update.dataset.premiumUpdate = '1';
-      update.addEventListener('click', () => run([...details.querySelectorAll('input:checked')].map(check => check.value), item.slug));
-      details.append(update); detailsRow.append(details); body.append(detailsRow);
+      if (!item.pending) {
+        const update = element('button', 'Update selected'); update.type = 'button'; update.className = 'mwu-primary'; update.dataset.premiumUpdate = '1';
+        update.addEventListener('click', () => run([...details.querySelectorAll('input:checked')].map(check => check.value), item.slug)); details.append(update);
+      }
+      detailsRow.append(details); body.append(detailsRow);
       view.addEventListener('click', () => { detailsRow.hidden = !detailsRow.hidden; view.setAttribute('aria-expanded', String(!detailsRow.hidden)); });
     }
     if (!snapshot.packages.length) { const row = element('tr'), cell = element('td', 'Your premium library is empty. Add your first plugin ZIP above.'); cell.colSpan = 5; row.append(cell); body.append(row); }
@@ -238,8 +253,9 @@
         box.append(element('strong', item.domain || item.owner));
         if (item.actions && item.actions.length) box.append(element('p', 'Completed: ' + item.actions.join(', ')));
         if (item.state === 'complete' && !item.actions.length) box.append(element('p', 'Completed. No update was needed.'));
-        if (item.skipped && item.skipped.length) { const list = element('details'), title = element('summary', 'Premium plugin details'); list.append(title, element('p', item.skipped.join('\n'))); box.append(list); }
+        if (item.skipped && item.skipped.length) { const list = element('details'), title = element('summary', 'Skipped plugin updates'); list.append(title, element('p', item.skipped.join('\n'))); box.append(list); }
         if (item.error) box.append(element('pre', item.error));
+        if (item.pending_premium && item.pending_premium.length) box.append(element('p', 'Added to premium library · Waiting for premium ZIP: ' + item.pending_premium.join(', ')));
         if (item.backup_storage) box.append(element('p', item.backup_storage.directory, 'mwu-path'));
         for (const warning of item.warnings || []) box.append(element('p', warning));
         if (item.backup_removed) box.append(element('p', 'Backups removed by retention or an administrator.'));

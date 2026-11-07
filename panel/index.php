@@ -48,7 +48,7 @@
     <div class="mwu-toolbar"><button type="button" id="mwu-add">+ Add premium plugins</button><input type="file" id="mwu-add-file" accept=".zip,application/zip" multiple hidden><span id="mwu-upload-status" role="status"></span></div>
     <div id="mwu-upload-results" class="mwu-scroll" hidden aria-label="ZIP upload results"></div>
     <p class="mwu-help">ZIPs stay in a private server directory. Replacing a ZIP updates the library; sites change only when you run an update. Maximum ZIP: 256 MiB; expanded contents: 1 GiB.</p>
-    <div class="mwu-scroll"><table><thead><tr><th>Plugin</th><th>Version</th><th>Replace ZIP</th><th>Sites</th><th>Delete</th></tr></thead><tbody id="mwu-packages"></tbody></table></div>
+    <div class="mwu-scroll"><table><thead><tr><th>Plugin</th><th>Version / Status</th><th>ZIP</th><th>Sites</th><th>Delete</th></tr></thead><tbody id="mwu-packages"></tbody></table></div>
     <p class="mwu-help">Premium updates use the backup choices in the Updates tab and apply only to installed copies with an older version.</p>
   </section>
 </div>

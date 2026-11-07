@@ -45,7 +45,8 @@ def status():
             plugin = next((p for p in site.get('plugins', []) if p['file'] == package['plugin_file']), None)
             if plugin:
                 package['sites'].append(dict(id=site['id'], domain=site['domain'], owner=site['owner'],
-                    version=plugin['version'], newer=host.compare(package['version'], plugin['version']) > 0,
+                    url=site.get('url',''),
+                    version=plugin['version'], newer=not package.get('pending') and host.compare(package['version'], plugin['version']) > 0,
                     error=site.get('error', '')))
     job = decorate_job(jobs.current())
     prerequisites = ''

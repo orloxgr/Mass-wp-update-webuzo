@@ -22,6 +22,13 @@ CLI = Path('/usr/local/webuzo/cli.php')
 ENV = {'PATH': '/usr/local/bin:/usr/bin:/usr/sbin:/bin:/sbin', 'LANG': 'C.UTF-8'}
 
 
+class SiteCommandError(RuntimeError):
+    def __init__(self,stdout,stderr):
+        self.stdout=stdout.decode('utf-8',errors='replace')
+        self.stderr=stderr.decode('utf-8',errors='replace')
+        super().__init__('Site command failed: '+(self.stderr or self.stdout or 'Site command failed')[-3000:])
+
+
 def native(kind):
     if kind not in ('users', 'domains'): raise ValueError('Invalid native discovery action')
     def request(*extra):
@@ -157,8 +164,7 @@ def run_as(account, arguments, cwd, timeout=300, output=None, database=False):
             raise
         stdout, stderr = bytes(buffers['stdout']), bytes(buffers['stderr'])
         if child.returncode:
-            message = (stderr or stdout or b'Site command failed').decode('utf-8', errors='replace')[-3000:]
-            raise RuntimeError('Site command failed: ' + message)
+            raise SiteCommandError(stdout,stderr)
         return (stdout or b'').decode('utf-8', errors='replace')
 
 
@@ -218,14 +224,19 @@ def compare(a, b):
 INVENTORY = '''require_once ABSPATH.'wp-admin/includes/plugin.php';
 $p=array();foreach(get_plugins() as $file=>$v){$p[]=array('file'=>$file,'name'=>$v['Name'],'version'=>$v['Version'],'active'=>is_plugin_active($file));}
 $t=array();foreach(wp_get_themes() as $slug=>$v){$t[]=array('slug'=>$slug,'version'=>$v->get('Version'));}
-echo json_encode(array('core'=>get_bloginfo('version'),'php'=>PHP_VERSION,'plugins'=>$p,'themes'=>$t,'multisite'=>is_multisite(),
+echo json_encode(array('core'=>get_bloginfo('version'),'php'=>PHP_VERSION,'url'=>home_url('/'),'plugins'=>$p,'themes'=>$t,'multisite'=>is_multisite(),
 'layout_ok'=>WP_CONTENT_DIR===ABSPATH.'wp-content' && WP_PLUGIN_DIR===WP_CONTENT_DIR.'/plugins' && get_theme_root()===WP_CONTENT_DIR.'/themes'));'''
 
 
 def inventory(site, cwd):
     value = json.loads(wp(site, ['eval', INVENTORY], cwd))
-    if not isinstance(value, dict) or set(value) != {'core', 'php', 'plugins', 'themes', 'multisite', 'layout_ok'}:
+    if not isinstance(value, dict) or set(value) != {'core', 'php', 'url', 'plugins', 'themes', 'multisite', 'layout_ok'}:
         raise ValueError('Invalid WordPress inventory response')
+    from urllib.parse import urlsplit
+    if not isinstance(value['url'],str) or len(value['url'])>4096:raise ValueError('Invalid WordPress home URL')
+    parsed=urlsplit(value['url'])
+    if parsed.scheme not in ('http','https') or not parsed.hostname or parsed.username or parsed.password:
+        raise ValueError('Invalid WordPress home URL')
     if not isinstance(value['plugins'], list) or not isinstance(value['themes'], list): raise ValueError('Invalid site inventory')
     if value['layout_ok'] is not True: raise ValueError('Custom content, plugin or theme directories are not supported')
     if type(value['multisite']) is not bool: raise ValueError('Invalid WordPress network inventory')
