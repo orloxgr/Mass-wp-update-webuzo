@@ -40,8 +40,9 @@
     </section>
   </section>
   <section id="mwu-premium" role="tabpanel" aria-labelledby="mwu-tab-premium" hidden>
-    <p>Upload an installable plugin ZIP. Its name and version are read from the plugin, so the ZIP filename does not matter.</p>
-    <div class="mwu-toolbar"><button type="button" id="mwu-add">+ Add new premium plugin</button><input type="file" id="mwu-add-file" accept=".zip,application/zip" hidden><span id="mwu-upload-status" role="status"></span></div>
+    <p>Select one or more installable plugin ZIPs. Each name and version is read from the plugin, so ZIP filenames do not matter.</p>
+    <div class="mwu-toolbar"><button type="button" id="mwu-add">+ Add premium plugins</button><input type="file" id="mwu-add-file" accept=".zip,application/zip" multiple hidden><span id="mwu-upload-status" role="status"></span></div>
+    <div id="mwu-upload-results" class="mwu-scroll" hidden aria-label="ZIP upload results"></div>
     <p class="mwu-help">ZIPs stay in a private server directory. Replacing a ZIP updates the library; sites change only when you run an update. Maximum ZIP: 256 MiB; expanded contents: 1 GiB.</p>
     <div class="mwu-scroll"><table><thead><tr><th>Plugin</th><th>Version</th><th>Replace ZIP</th><th>Sites</th></tr></thead><tbody id="mwu-packages"></tbody></table></div>
     <p class="mwu-help">Premium updates use the backup choices in the Updates tab and apply only to installed copies with an older version.</p>

@@ -89,7 +89,7 @@
   function uploadInput(replace) {
     const input = element('input'); input.type = 'file'; input.accept = '.zip,application/zip'; input.hidden = true;
     input.addEventListener('change', async () => {
-      if (input.files.length) await upload(input.files[0], replace);
+      if (input.files.length) await uploadFiles([input.files[0]], replace);
       input.value = '';
     });
     return input;
@@ -134,25 +134,55 @@
     if (!snapshot.packages.length) { const row = element('tr'), cell = element('td', 'Your premium library is empty. Add your first plugin ZIP above.'); cell.colSpan = 4; row.append(cell); body.append(row); }
     updateControls();
   }
-  async function upload(file, replace) {
-    if (uploading) return;
-    if (!file.name.toLowerCase().endsWith('.zip') || !file.size || file.size > 256 * 1024 * 1024) { message('Select a non-empty plugin ZIP up to 256 MiB.', true); return; }
-    uploading = true; updateControls(); byId('error').hidden = true;
+  async function uploadFile(file, replace, progress) {
+    if (!file.name.toLowerCase().endsWith('.zip') || !file.size || file.size > 256 * 1024 * 1024) throw new Error('Select a non-empty plugin ZIP up to 256 MiB.');
     let identity = null;
     try {
       const initial = await request({action:'upload_begin',size:file.size,replace}); identity = initial.upload;
       for (let offset = 0; offset < file.size; offset += 1024 * 1024) {
-        byId('upload-status').textContent = 'Uploading ' + file.name + ' · ' + Math.floor(offset * 100 / file.size) + '%';
+        progress('Uploading · ' + Math.floor(offset * 100 / file.size) + '%');
         await request({action:'upload_chunk',upload:identity,offset}, file.slice(offset, offset + 1024 * 1024));
       }
-      byId('upload-status').textContent = 'Checking ZIP…';
+      progress('Checking ZIP…');
       const result = await request({action:'upload_finish',upload:identity}); identity = null;
-      message(result.package.name + ' ' + result.package.version + ' is available in the library.');
-      await load();
+      return result.package;
     } catch (error) {
-      message(error.message, true);
       if (identity) { try { await request({action:'upload_abort',upload:identity}); } catch (unused) { /* A later refresh can still show a completed import. */ } }
-    } finally { uploading = false; byId('upload-status').textContent = ''; updateControls(); }
+      throw error;
+    }
+  }
+  async function uploadFiles(selection, replace = null) {
+    const files = Array.from(selection);
+    if (uploading || !files.length) return;
+    uploading = true; updateControls(); byId('error').hidden = true; byId('notice').hidden = true;
+    const output = byId('upload-results'); output.hidden = false; output.replaceChildren();
+    const table = element('table'), head = element('thead'), heading = element('tr'), body = element('tbody');
+    heading.append(element('th','ZIP file'), element('th','Result')); head.append(heading); table.append(head,body); output.append(table);
+    const rows = files.map(file => {
+      const row = element('tr'), status = element('td','Waiting'); row.append(element('td',file.name),status); body.append(row); return status;
+    });
+    let imported = 0, failed = 0;
+    try {
+      for (let index = 0; index < files.length; index++) {
+        const file = files[index], status = rows[index];
+        const progress = text => {
+          status.textContent = text;
+          byId('upload-status').textContent = 'File ' + (index + 1) + ' of ' + files.length + ' · ' + file.name + ' · ' + text;
+        };
+        try {
+          progress('Starting…');
+          const item = await uploadFile(file, replace, progress);
+          status.textContent = 'Imported: ' + item.name + ' ' + item.version;
+          imported++;
+        } catch (error) {
+          status.textContent = error.message; status.className = 'mwu-failure'; failed++;
+        }
+      }
+      const summary = imported + ' ZIP(s) imported' + (failed ? ' · ' + failed + ' failed. See each file below.' : '.');
+      byId('upload-status').textContent = summary; message(summary);
+      try { await load(); }
+      catch (error) { message('Uploads finished, but the library could not refresh: ' + error.message, true); }
+    } finally { uploading = false; updateControls(); }
   }
   function download(button, jobId, site, name) {
     const form = element('form'); form.method = 'POST'; form.action = window.location.href; form.target = '_blank'; form.hidden = true;
@@ -261,7 +291,7 @@
   });
   byId('older').addEventListener('click', () => history(true).catch(error => message(error.message, true)));
   byId('add-file').addEventListener('change', async event => {
-    if (event.target.files.length) await upload(event.target.files[0], null);
+    if (event.target.files.length) await uploadFiles(event.target.files);
     event.target.value = '';
   });
   if (demo) message('Demo mode: updates and uploads are disabled.');
