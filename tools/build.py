@@ -2,6 +2,7 @@
 import hashlib
 import json
 import os
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 import zipfile
@@ -9,8 +10,17 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def build():
+def package_version():
     version = json.loads((ROOT / 'info.json').read_text(encoding='utf-8'))['version']
+    header = (ROOT / 'mass-wp-update-webuzo.php').read_text(encoding='utf-8').split('*/', 1)[0]
+    found = re.search(r'^[ \t]*Version:[ \t]*([^\r\n]+)', header, re.M)
+    if not isinstance(version, str) or not version or found is None or found[1].strip() != version:
+        raise ValueError('The PHP plugin Version header must match info.json before packaging')
+    return version
+
+
+def build():
+    version = package_version()
     output = ROOT / 'dist'; output.mkdir(exist_ok=True)
     target = output / ('mass-wp-update-webuzo-' + version + '.zip')
     paths = [ROOT / name for name in ('mass-wp-update-webuzo.php', 'info.json', 'LICENSE', 'README.md', 'UPSTREAM')]
