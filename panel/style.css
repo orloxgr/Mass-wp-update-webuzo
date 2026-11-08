@@ -7,3 +7,4 @@
 .mwu .mwu-site-link{color:#2f4597;text-decoration:underline;text-underline-offset:2px}
 
 .mwu-error-details pre{white-space:pre-wrap;overflow-wrap:anywhere;max-width:100%}.mwu-error-details summary{cursor:pointer}.mwu-error-info{overflow-wrap:anywhere}#mwu-site-progress{font-weight:600}
+.mwu .mwu-has-result>td{border-bottom:0;padding-bottom:6px}.mwu .mwu-site-result>td{padding:0 12px 16px 44px}.mwu .mwu-site-result .mwu-result{margin:0}@media(max-width:700px){.mwu .mwu-site-result>td{padding-left:8px;padding-right:8px}}

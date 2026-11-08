@@ -9,7 +9,7 @@ Update WordPress sites from the Webuzo administrator panel and keep your premium
 3. Choose whether to back up **plugins**, **themes**, and the **database**, and how many backup sets to keep per site (1–10, default 1).
 4. Click **Update selected sites**.
 
-Sites run one at a time. Selected backups finish before that site's updates begin; a failed backup stops updates for that site. Activity shows completed actions, skipped premium updates, errors, and backup downloads. **Previous updates & backups** keeps earlier results and downloads available. **Stop after current site** lets the current site finish before the next one starts.
+Sites run one at a time. Selected backups finish before that site's updates begin; a failed backup stops updates for that site. The latest job's completed actions, premium plugin details, errors, warnings and backup downloads appear directly beneath each matching site in the table. Activity shows the website counter and current operation. **Previous updates & backups** keeps earlier results and downloads available. **Stop after current site** lets the current site finish before the next one starts.
 
 Update and backup choices, including retention, save automatically on the server and return after refresh or a new login. Theme updates start enabled; an explicit disabled choice is retained. Changed choices apply to future jobs. Premium-only actions keep the general choices unchanged.
 
@@ -31,7 +31,7 @@ Backups are stored under the hosting account's home, outside its Webuzo document
 
 Only the selected ZIPs are created. `database.zip` contains `database.sql`; the other ZIPs contain the selected `wp-content/plugins` or `wp-content/themes` directory. Each WordPress installation has a separate site ID, including installations within the same account. Dates use the server's local time. Files belong to the hosting account with permissions 600; backup directories use 700. Backups count toward the account's disk quota. They are not a complete site backup or an automatic rollback.
 
-**Keep latest backups per site** keeps the newest 1–10 backup sets, including the set just created. The choice is remembered for subsequent jobs. Older sets are removed only after every selected backup for that site finishes successfully. A failed backup preserves the previous completed sets and stops that site's updates. Activity reports any files that could not be removed.
+**Keep latest backups per site** keeps the newest 1–10 backup sets, including the set just created. The choice is remembered for subsequent jobs. Older sets are removed only after every selected backup for that site finishes successfully. A failed backup preserves the previous completed sets and stops that site's updates. The site's result reports any files that could not be removed.
 
 Each site row has **Delete backups**, with confirmation for that specific WordPress installation. It removes that site's managed backup sets without touching another installation's backups. Deletion is unavailable while a job is running. Files with unexpected names, ownership, permissions or links are left in place and reported. Download links disappear from job results when their backups are removed by retention or an administrator.
 

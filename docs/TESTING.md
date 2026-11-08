@@ -34,3 +34,9 @@ python3 -m unittest discover -s tests -v
 ```
 
 Runtime tests use disposable account-owned fixtures and private deployment data, which are excluded from the repository and release ZIP.
+
+## 0.4.1 inline site results
+
+Ported the result placement from Hestia commit `903dba7cf349`. The latest update results appear beneath their matching installation IDs; Activity contains only the job summary, website counter and current operation. Previous-job details retain their own download identities.
+
+Browser checks rendered the actual Webuzo PHP view and JavaScript against fixture API replies. They covered two installations sharing one domain, a site without a result, successful and failed results, premium details, warnings, text escaping, exact job/site download requests, history, bulk selection, incremental polling, page reload and replacement by a discovery job. Desktop and narrow layouts were visually inspected; no addon JavaScript errors occurred. JavaScript and PHP syntax checks and all eight panel request rejection checks passed. No update or backup engine changes were made in this version; these checks did not run real site updates or deploy to a server.

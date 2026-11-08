@@ -93,6 +93,7 @@
     for (const id of selected) if (!valid.has(id)) selected.delete(id);
     for (const site of sites) {
       const row = element('tr'), cell = element('td'), check = element('input');
+      row.dataset.siteRow = site.id;
       check.type = 'checkbox'; check.checked = selected.has(site.id); check.disabled = !!site.error;
       check.setAttribute('aria-label', 'Select ' + site.domain);
       check.addEventListener('change', () => { if (check.checked) selected.add(site.id); else selected.delete(site.id); syncSelection(); });
@@ -106,6 +107,7 @@
       remove.addEventListener('click', () => deleteBackups(site)); backups.append(remove); row.append(backups);
       body.append(row);
     }
+    renderSiteResults();
     if (!sites.length) { const row = element('tr'), cell = element('td', 'No sites listed yet. Click Refresh sites to discover WordPress installations.'); cell.colSpan = 7; row.append(cell); body.append(row); }
     byId('site-count').textContent = sites.length + ' WordPress site(s)' + (snapshot.inventory.scanned_at ? ' · Last scan: ' + new Date(snapshot.inventory.scanned_at * 1000).toLocaleString() : '');
     const errors = byId('discovery-errors'); errors.replaceChildren();
@@ -256,6 +258,10 @@
   }
   function drawJob(value) {
     job = value; byId('job').hidden = !job;
+    const signature = JSON.stringify(job ? [job.id, job.results] : null);
+    if (signature !== resultsSignature) {
+      resultsSignature = signature; renderSiteResults();
+    }
     if (!job) { updateControls(); return; }
     const siteProgress=byId('site-progress');
     siteProgress.hidden=job.kind!=='update'||!Number.isInteger(job.site_total)||job.site_total<1;
@@ -263,36 +269,46 @@
     byId('job-status').textContent = job.message;
     byId('stop').hidden = !active();
     byId('stop').textContent = job.kind === 'scan' ? 'Stop scan' : 'Stop after current site';
-    const signature = JSON.stringify([job.id, job.results]);
-    if (signature !== resultsSignature) {
-      resultsSignature = signature; renderResults(job, byId('results'));
-    }
     updateControls();
   }
+  function renderSiteResults() {
+    const body = byId('sites');
+    body.querySelectorAll('.mwu-site-result').forEach(row => row.remove());
+    const results = new Map(job && job.kind === 'update' ? job.results.map(item => [item.site, item]) : []);
+    for (const row of body.querySelectorAll('[data-site-row]')) {
+      const item = results.get(row.dataset.siteRow);
+      row.classList.toggle('mwu-has-result', !!item);
+      if (!item) continue;
+      const detail = element('tr', undefined, 'mwu-site-result'), cell = element('td');
+      detail.dataset.resultSite = row.dataset.siteRow;
+      cell.colSpan = 7; cell.append(renderResult(item, job.id, false)); detail.append(cell);
+      row.after(detail);
+    }
+  }
   function renderResults(displayedJob, target) {
-      target.replaceChildren();
-      const displayedJobId = displayedJob.id;
-      for (const item of displayedJob.results) {
-        const box = element('div', undefined, 'mwu-result' + (item.state === 'failed' || item.error ? ' failed' : ''));
-        box.append(element('strong', item.domain || item.owner));
-        if (item.actions && item.actions.length) box.append(element('p', 'Completed: ' + item.actions.join(', ')));
-        if (item.state === 'complete' && !item.actions.length) box.append(element('p', 'Completed. No update was needed.'));
-        if (item.skipped && item.skipped.length) { const list = element('details'), title = element('summary', 'Skipped plugin updates'); list.append(title, element('p', item.skipped.join('\n'))); box.append(list); }
-        if (item.error) box.append(errorView(item));
-        if (item.pending_premium && item.pending_premium.length) box.append(element('p', 'Added to premium library · Awaiting premium ZIP: ' + item.pending_premium.join(', ')));
-        if (item.backup_storage) box.append(element('p', item.backup_storage.directory, 'mwu-path'));
-        for (const warning of item.warnings || []) box.append(element('p', warning));
-        if (item.backup_removed) box.append(element('p', 'Backups removed by retention or an administrator.'));
-        if (!item.backup_removed && item.backups && item.backups.length) {
-          const links = element('div', undefined, 'mwu-downloads');
-          for (const file of [...item.backups, {name:'manifest.json'}]) {
-            const button = element('button', 'Download ' + file.name); button.type = 'button';
-            button.addEventListener('click', () => download(button, displayedJobId, item.site, file.name)); links.append(button);
-          }
-          box.append(links);
-        }
-        target.append(box);
+    target.replaceChildren();
+    for (const item of displayedJob.results) target.append(renderResult(item, displayedJob.id));
+  }
+  function renderResult(item, displayedJobId, title = true) {
+    const box = element('div', undefined, 'mwu-result' + (item.state === 'failed' || item.error ? ' failed' : ''));
+    if (title) box.append(element('strong', item.domain || item.owner));
+    if (item.actions && item.actions.length) box.append(element('p', 'Completed: ' + item.actions.join(', ')));
+    if (item.state === 'complete' && !item.actions.length) box.append(element('p', 'Completed. No update was needed.'));
+    if (item.skipped && item.skipped.length) { const list = element('details'), title = element('summary', 'Premium plugin details'); list.append(title, element('p', item.skipped.join('\n'))); box.append(list); }
+    if (item.error) box.append(errorView(item));
+    if (item.pending_premium && item.pending_premium.length) box.append(element('p', 'Added to premium library · Awaiting premium ZIP: ' + item.pending_premium.join(', ')));
+    if (item.backup_storage) box.append(element('p', item.backup_storage.directory, 'mwu-path'));
+    for (const warning of item.warnings || []) box.append(element('p', warning));
+    if (item.backup_removed) box.append(element('p', 'Backups removed by retention or an administrator.'));
+    if (!item.backup_removed && item.backups && item.backups.length) {
+      const links = element('div', undefined, 'mwu-downloads');
+      for (const file of [...item.backups, {name:'manifest.json'}]) {
+        const button = element('button', 'Download ' + file.name); button.type = 'button';
+        button.addEventListener('click', () => download(button, displayedJobId, item.site, file.name)); links.append(button);
       }
+      box.append(links);
+    }
+    return box;
   }
   async function history(append = false) {
     const result = await request({action:'history',before:append ? historyCursor : null});

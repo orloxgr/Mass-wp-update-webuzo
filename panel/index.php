@@ -32,7 +32,6 @@
     <section class="mwu-job" id="mwu-job" hidden aria-live="polite">
       <h3>Activity</h3><p id="mwu-site-progress" hidden></p><p id="mwu-job-status"></p>
       <button type="button" id="mwu-stop" hidden>Stop after current site</button>
-      <div id="mwu-results"></div>
     </section>
     <div id="mwu-discovery-errors"></div>
     <div class="mwu-scroll"><table><thead><tr><th><input type="checkbox" id="mwu-select-all" aria-label="Select all sites"></th><th>Site</th><th>Account</th><th>WordPress</th><th>PHP</th><th>Status</th><th>Backups</th></tr></thead><tbody id="mwu-sites"></tbody></table></div>
