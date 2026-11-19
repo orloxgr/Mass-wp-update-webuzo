@@ -39,9 +39,9 @@ Backups made by versions before 0.2.0 remain in their original root-private stor
 
 ## Premium plugins
 
-Open **Premium plugins** and click **+ Add premium plugins**. Select one or more installable ZIPs supplied by their developers. Files upload one at a time, with progress and a result for each ZIP; a failed file does not stop the rest. Existing library entries are kept until you use **Replace ZIP**. The plugin reads each name and version from its PHP header without executing it, and stores it as `plugin-directory-version.zip` in a root-private directory outside website document roots.
+Open **Premium plugins** and click **+ Add premium plugins**. Select one or more installable ZIPs supplied by their developers. Files upload one at a time, with progress and a result for each ZIP; a failed file does not stop the rest. A ZIP matching an existing entry's plugin directory and main PHP file automatically replaces that entry's current package. New plugins are added to the library; a matching directory with a different main file is rejected. The plugin reads each name and version from its PHP header without executing it, and stores it as `plugin-directory-version.zip` in a root-private directory outside website document roots.
 
-**Replace ZIP** replaces the library's current package for that plugin. It checks the plugin directory and main file against the existing entry. **View sites** shows installed copies and their versions; select the older copies and click **Update selected**. This action uses the backup choices in the Updates tab and updates only that premium plugin.
+**Replace ZIP** remains available to upload a ZIP for a specific plugin. It checks the plugin directory and main file against the selected entry. **View sites** shows installed copies and their versions; select the older copies and click **Update selected**. This action uses the backup choices in the Updates tab and updates only that premium plugin.
 
 Uploading or replacing a ZIP never updates a site automatically. Running jobs keep the exact package versions selected when they started. ZIP filenames do not need to include a version. Additional premium plugins can be added at any time.
 

@@ -156,8 +156,7 @@ def commit(source, expected=None):
             raise ValueError('Replacement ZIP must contain the same plugin directory and main file')
     elif metadata['slug'] in current:
         existing=current[metadata['slug']]
-        if not existing.get('pending'):raise ValueError('This plugin is already in the library; use Replace ZIP')
-        if existing['plugin_file']!=metadata['plugin_file']:raise ValueError('ZIP must contain the same plugin directory and main file as the waiting entry')
+        if existing['plugin_file']!=metadata['plugin_file']:raise ValueError('ZIP must contain the same plugin directory and main file as the existing entry')
     destination = state.ROOT / 'packages' / metadata['sha256']
     state.mkdir(destination)
     target = destination / (metadata['slug'] + '-' + metadata['version'] + '.zip')

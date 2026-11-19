@@ -102,16 +102,23 @@ class BackendTests(unittest.TestCase):
 
     def test_replacement_keeps_pinned_old_package(self):
         first = catalog.commit(plugin_zip(self.base / 'first.zip', '1.0'))
-        second = catalog.commit(plugin_zip(self.base / 'second.zip', '2.0'), first['slug'])
+        second = catalog.commit(plugin_zip(self.base / 'second.zip', '2.0'))
         self.assertTrue(catalog.package(first).is_file())
         self.assertNotEqual(catalog.package(first), catalog.package(second))
         self.assertEqual(catalog.entries()[first['slug']]['version'], '2.0')
         self.assertEqual(stat.S_IMODE(catalog.package(second).stat().st_mode), 0o600)
 
-    def test_replacement_rejects_another_plugin_and_implicit_overwrite(self):
+    def test_replacement_rejects_another_plugin_or_conflicting_main_file(self):
         first = catalog.commit(plugin_zip(self.base / 'first.zip'))
-        with self.assertRaises(ValueError): catalog.commit(plugin_zip(self.base / 'second.zip', main='other.php'), first['slug'])
-        with self.assertRaises(ValueError): catalog.commit(plugin_zip(self.base / 'third.zip'))
+        for expected in (None, first['slug']):
+            with self.subTest(expected=expected):
+                source = plugin_zip(self.base / 'conflict.zip', main='other.php')
+                with self.assertRaisesRegex(ValueError, 'same plugin'):
+                    catalog.commit(source, expected)
+                self.assertTrue(source.exists())
+                self.assertEqual(catalog.entries()[first['slug']], first)
+        with self.assertRaises(ValueError):
+            catalog.commit(plugin_zip(self.base / 'another.zip', slug='another-plugin'), first['slug'])
 
     def test_delete_premium_removes_only_selected_plugin_and_its_versions(self):
         first=catalog.commit(plugin_zip(self.base/'first.zip','1.0',slug='example'))

@@ -42,7 +42,7 @@
     </section>
   </section>
   <section id="mwu-premium" role="tabpanel" aria-labelledby="mwu-tab-premium" hidden>
-    <p>Select one or more installable plugin ZIPs. Each name and version is read from the plugin, so ZIP filenames do not matter.</p>
+    <p>Select one or more installable plugin ZIPs. Matching plugins already in your library are replaced automatically. Each name and version is read from the plugin, so ZIP filenames do not matter.</p>
     <div class="mwu-toolbar"><button type="button" id="mwu-add">+ Add premium plugins</button><input type="file" id="mwu-add-file" accept=".zip,application/zip" multiple hidden><span id="mwu-upload-status" role="status"></span></div>
     <div id="mwu-upload-results" class="mwu-scroll" hidden aria-label="ZIP upload results"></div>
     <p class="mwu-help">ZIPs stay in a private server directory. Replacing a ZIP updates the library; sites change only when you run an update. Maximum ZIP: 256 MiB; expanded contents: 1 GiB.</p>
